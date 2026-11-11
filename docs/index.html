@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#f5f7f3">
+  <meta name="description" content="以病例为中心的宠物临床模拟训练。">
+  <title>宠物问诊室</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <main id="shell">
+    <section id="library" class="screen" aria-labelledby="library-title">
+      <header class="topbar">
+        <span class="brand"><span class="brand-mark" aria-hidden="true">+</span>宠物问诊室</span>
+        <button class="soft" data-assistant type="button">系统帮助</button>
+      </header>
+      <div class="scroll library-content">
+        <section class="library-hero">
+          <img src="./assets/clinic-pets.jpg" alt="" width="1536" height="1024">
+          <div>
+            <h1 id="library-title">病例管理</h1>
+            <p>从病例开始接诊训练</p>
+            <button class="primary" id="new-case" type="button"><span aria-hidden="true">＋</span> 新建病例</button>
+          </div>
+        </section>
+        <div class="list-heading">
+          <h2>我的病例</h2>
+          <span class="local-label">本机保存</span>
+        </div>
+        <p id="library-error" class="feedback error" role="alert" hidden></p>
+        <div id="library-empty" class="empty" role="status">
+          <span class="empty-icon file-icon" aria-hidden="true"></span>
+          <h3 id="library-empty-title">正在读取病例…</h3>
+          <p id="library-empty-detail"></p>
+        </div>
+        <ul id="case-list" class="case-list" aria-label="病例列表"></ul>
+      </div>
+    </section>
+
+    <section id="create" class="screen" aria-labelledby="create-title" hidden>
+      <header class="topbar subpage">
+        <button class="back" data-library type="button" aria-label="返回病例管理">‹</button>
+        <h1 id="create-title">新建病例</h1>
+      </header>
+      <form id="settings" class="create-form">
+        <div class="scroll create-content">
+          <fieldset id="settings-fields">
+            <div class="form-card">
+              <label for="scope-detail">病例范围（选填）</label>
+              <input id="scope-detail" name="scopeDetail" placeholder="留空随机，例如：猫、呕吐、急诊" maxlength="180">
+              <label for="difficulty">家长难度</label>
+              <select id="difficulty" name="difficulty">
+                <option value="配合型">配合型 · 信息清楚</option>
+                <option value="普通型" selected>普通型 · 随机人设</option>
+                <option value="高难度型">高难度 · 信息零散</option>
+                <option value="难缠家长">难缠家长 · 沟通挑战</option>
+              </select>
+              <select id="persona" name="persona" aria-label="指定家长人设" hidden>
+                <option value="">随机抽取人设</option>
+                <option>AI 信徒</option><option>人医/护士</option><option>繁育人/店主</option>
+                <option>网红博主</option><option>维权预警</option><option>讨价还价</option>
+                <option>二手信息</option><option>多宠混淆</option><option>情绪爆炸</option>
+              </select>
+            </div>
+            <details class="form-card advanced">
+              <summary>更多训练选项</summary>
+              <div class="advanced-fields">
+                <label class="check"><input type="checkbox" name="emergency"> 急诊时间压力</label>
+                <label class="check"><input type="checkbox" name="treatment" checked> 治疗沟通</label>
+                <label class="check"><input type="checkbox" name="comorbidity"> 双病共存</label>
+              </div>
+            </details>
+          </fieldset>
+          <p id="create-preview" class="preview" hidden></p>
+        </div>
+        <footer class="action-bar">
+          <p id="create-feedback" class="feedback" role="status" hidden></p>
+          <div id="create-request-status" class="request-status" hidden>
+            <span id="create-request-label" role="status"></span>
+            <button type="button" class="soft" data-stop>停止</button>
+          </div>
+          <button class="primary wide" id="start" type="submit">生成病例</button>
+        </footer>
+      </form>
+    </section>
+
+    <section id="clinic" class="screen" aria-labelledby="clinic-title" hidden>
+      <header class="topbar subpage">
+        <button class="back" data-library type="button" aria-label="返回病例管理">‹</button>
+        <div class="case-heading">
+          <h1 id="clinic-title"></h1>
+          <p id="session-summary"></p>
+        </div>
+        <button class="soft" data-assistant type="button">病例助手</button>
+      </header>
+      <nav class="case-tabs" aria-label="病例内容">
+        <button type="button" data-tab="transcript" aria-controls="transcript" aria-pressed="true">接诊</button>
+        <button type="button" data-tab="results-panel" aria-controls="results-panel" aria-pressed="false">检查 <span id="result-count" class="count" hidden></span></button>
+        <button type="button" data-tab="profile-panel" aria-controls="profile-panel" aria-pressed="false">档案</button>
+        <button type="button" data-tab="review-panel" aria-controls="review-panel" aria-pressed="false">复盘</button>
+      </nav>
+      <div id="transcript" class="scroll transcript" tabindex="0" aria-label="接诊记录">
+        <div class="messages" id="messages" role="log" aria-label="接诊对话"></div>
+      </div>
+      <div id="results-panel" class="scroll panel" tabindex="0" aria-label="检查结果" hidden>
+        <div id="results-empty" class="empty">
+          <span class="empty-icon file-icon" aria-hidden="true"></span>
+          <h2>暂无检查结果</h2>
+          <p>在接诊中执行体检或开具检查，报告会归档到这里。</p>
+        </div>
+        <div id="result-list" class="result-list"></div>
+      </div>
+      <div id="profile-panel" class="scroll panel" tabindex="0" aria-label="病例档案" hidden>
+        <div id="profile-content"></div>
+        <button type="button" id="delete-case" class="danger wide">删除病例</button>
+      </div>
+      <div id="review-panel" class="scroll panel" tabindex="0" aria-label="复盘报告" hidden>
+        <div id="review-empty" class="empty">
+          <span class="empty-icon file-icon" aria-hidden="true"></span>
+          <h2>暂无复盘报告</h2>
+          <p>结束接诊后，可以查看诊断、接诊反馈和备注评价。</p>
+          <button type="button" class="primary" data-review>结束接诊并复盘</button>
+        </div>
+        <article id="review-content" class="review-report" aria-label="接诊复盘报告" hidden></article>
+      </div>
+      <footer class="action-bar" id="composer">
+        <p id="feedback" class="feedback" role="status" hidden></p>
+        <div id="request-status" class="request-status" hidden>
+          <span id="request-label" role="status"></span>
+          <button type="button" class="soft" data-stop>停止</button>
+        </div>
+        <button class="primary wide" id="start-consultation" type="button" aria-controls="transcript" hidden>开始接诊</button>
+        <div id="chat-controls">
+          <form id="chat-form" class="consultation-form">
+            <label for="note-draft" class="sr-only">本轮想法或备注</label>
+            <textarea id="note-draft" rows="1" maxlength="1200" placeholder="想法 / 备注（选填，随本轮消息保存）"></textarea>
+            <div class="compose-box">
+              <label for="draft" class="sr-only">输入接诊消息</label>
+              <textarea id="draft" rows="2" maxlength="3000" placeholder="问病史、安排检查或给出诊断判断…"></textarea>
+              <button class="primary send" type="submit" id="send" aria-label="发送接诊消息" disabled>↑</button>
+            </div>
+          </form>
+          <button class="text-button review-button" data-review type="button">结束接诊并复盘</button>
+          <button class="text-button review-button" id="reviewed" type="button" hidden>查看复盘报告 ›</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <dialog id="assistant-dialog" aria-labelledby="assistant-title">
+    <div class="dialog-content">
+      <header class="topbar subpage">
+        <h2 id="assistant-title">系统帮助</h2>
+        <form method="dialog"><button class="soft close" aria-label="关闭助手" autofocus>×</button></form>
+      </header>
+      <div class="scroll assistant-scroll" id="assistant-scroll">
+        <div id="system-guide" class="system-guide" hidden>
+          <p>你扮演兽医，AI 扮演宠物家长。通过模拟问诊练习病史采集、诊断判断和与不同性格的家长沟通。</p>
+          <ol>
+            <li><strong>新建病例。</strong> 指定想练的病例范围，或留空随机生成。选择家长难度，也可以开启急诊时间压力、治疗沟通或双病共存。</li>
+            <li><strong>开始接诊。</strong> 先看宠物和照护者档案，再用自然语言问病史、安排检查、解释判断或商量方案。报告当轮归档到「检查」。可以记录每轮想法，卡住时打开「病例助手」获取提示。</li>
+            <li><strong>结束接诊并复盘。</strong> 在「复盘」查看诊断、评分、问诊与沟通反馈，以及每轮备注的评价。</li>
+          </ol>
+          <p>病例保存在当前浏览器，回到「病例管理」可以重新打开。</p>
+        </div>
+        <p id="assistant-intro" class="page-intro"></p>
+        <div class="suggestions" id="assistant-suggestions"></div>
+        <div class="messages" id="assistant-messages" role="log" aria-label="助手对话"></div>
+      </div>
+      <footer class="action-bar">
+        <p id="assistant-feedback" class="feedback" role="status" hidden></p>
+        <div id="assistant-request-status" class="request-status" hidden>
+          <span id="assistant-request-label" role="status"></span>
+          <button type="button" class="soft" data-stop>停止</button>
+        </div>
+        <form id="assistant-form" class="compose-box">
+          <label for="assistant-draft" class="sr-only">输入助手问题</label>
+          <textarea id="assistant-draft" rows="2" maxlength="3000"></textarea>
+          <button class="primary send" type="submit" id="assistant-send" aria-label="发送助手问题" disabled>↑</button>
+        </form>
+      </footer>
+    </div>
+  </dialog>
+  <noscript>请启用 JavaScript 后开始训练。</noscript>
+</body>
+</html>

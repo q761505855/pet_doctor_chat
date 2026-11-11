@@ -1,0 +1,10 @@
+{
+  "baseUrl": "https://openai.chatnewai.com/v1",
+  "apiKey": "",
+  "model": "gemini-3.8-flash",
+  "timeoutMs": 90000,
+  "parameters": {},
+  "headers": {
+    "mj-api-secret": "sk-epCnDzemNYBjHDdpvhkqXFanz0P8k5fMGQfiBnTehqFnrfPL"
+  }
+}
