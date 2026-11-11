@@ -27,27 +27,35 @@ export function createCase(settings, dossier, opening, profile = caseProfile(dos
     byte => byte.toString(16).padStart(2, '0')).join('');
   return {
     id, createdAt: now, updatedAt: now, revision: 0,
-    settings, profile, dossier,
+    settings, profile, dossier, opening,
     phase: 'consultation', turns: 0, hints: 0, metaAttempts: 0,
     history: [{ role: 'assistant', content: opening }], results: [], assistantHistory: []
   };
 }
 
-export function recordTurn(current, input, result, note = '', stage = 'consultation') {
+export function nextTurnNumber(current) {
+  const lastMessageTurn = current.history.reduce((last, message) => Math.max(last, message.turn ?? 0), 0);
+  const lastReportTurn = current.results.reduce((last, report) => Math.max(last, report.turn ?? 0), 0);
+  return Math.max(lastMessageTurn, lastReportTurn, current.turns + (current.surgeryTurns ?? 0)) + 1;
+}
+
+export function recordTurn(current, input, result, note = '', stage = 'consultation', retry = false) {
   const surgery = stage === 'surgery';
-  const turn = current.turns + (current.surgeryTurns ?? 0) + 1;
+  const turn = retry ? current.history.at(-1).turn : nextTurnNumber(current);
   const phase = !surgery && ['judgment', 'treatment'].includes(result.phase) ? 'judgment' : current.phase;
   const context = surgery ? { stage } : {};
   const thought = note.trim();
   return {
     ...current, phase,
-    turns: current.turns + Number(!surgery),
-    ...(surgery && { surgeryTurns: (current.surgeryTurns ?? 0) + 1 }),
+    turns: current.turns + Number(!surgery && !retry),
+    ...(surgery && !retry && { surgeryTurns: (current.surgeryTurns ?? 0) + 1 }),
     metaAttempts: current.metaAttempts + Number(result.metaAttempt === true),
     history: [...current.history,
-      { role: 'user', content: input, turn, ...context, ...(thought && { note: thought }) },
-      { role: 'assistant', content: result.reply, turn, ...context }],
-    results: [...current.results, ...(result.results ?? []).map(item => ({ ...item, turn }))]
+      ...(!retry ? [{ role: 'user', content: input, turn, ...context, ...(thought && { note: thought }) }] : []),
+      { role: 'assistant', content: result.reply, turn, ...context,
+        ...(phase === 'judgment' && { phase }), ...(result.metaAttempt && { metaAttempt: true }) }],
+    results: [...current.results.filter(item => !retry || item.turn !== turn),
+      ...(result.results ?? []).map(item => ({ ...item, turn }))]
   };
 }
 
@@ -67,6 +75,22 @@ export function caseMessages(current) {
     !(message.role === 'user' && message.content === '结束本次接诊，开始复盘。' && history[index + 1]?.type === 'review'));
 }
 
+export function rewindCase(current, message) {
+  if (current.phase === 'review') throw new Error('已复盘的病例对话只能查看。');
+  const index = current.history.indexOf(message);
+  const history = current.history.slice(0, index + 1);
+  const retained = new Map(history.filter(entry => entry.turn).map(entry => [entry.turn, entry.stage]));
+  const surgeryTurns = [...retained.values()].filter(stage => stage === 'surgery').length;
+  const lastTurn = Math.max(0, ...retained.keys());
+  const results = current.results.filter(report => message.turn ? report.turn < message.turn : report.turn <= lastTurn);
+  const removedAttempts = current.history.slice(index + 1).filter(entry => entry.metaAttempt).length;
+  return {
+    ...current, history, results, turns: retained.size - surgeryTurns, surgeryTurns,
+    metaAttempts: Math.max(0, current.metaAttempts - removedAttempts),
+    phase: history.some(entry => entry.phase === 'judgment') ? 'judgment' : 'consultation'
+  };
+}
+
 const formalMessages = current => caseMessages(current).filter(message => message.type !== 'debug');
 
 export function reviewNotes(current) {
@@ -75,7 +99,10 @@ export function reviewNotes(current) {
 }
 
 export function clinicalHistory(current, targetStage) {
-  return formalMessages(current).flatMap(({ role, content, turn, type, stage }) => {
+  const messages = formalMessages(current);
+  const reportTurns = new Set(messages.filter(message => message.role === 'assistant' && message.turn)
+    .map(message => message.turn));
+  const history = messages.flatMap(({ role, content, turn, type, stage }) => {
     const surgery = stage === 'surgery';
     const reports = role === 'assistant' && !type && turn ? current.results
       .filter(item => item.turn === turn).map(item => `【检查报告】${JSON.stringify(item)}`) : [];
@@ -94,6 +121,12 @@ export function clinicalHistory(current, targetStage) {
       ...reports.map(report => ({ role: 'system', content: `【客观报告，家长所知以实际告知为准】${report}` }))
     ];
   });
+  for (const report of current.results) {
+    if (!reportTurns.has(report.turn)) {
+      history.push({ role: 'system', content: `【已归档客观报告，家长所知以实际告知为准】${JSON.stringify(report)}` });
+    }
+  }
+  return history;
 }
 
 export function helperContext(current) {

@@ -2,8 +2,8 @@ import {
   allowsCaseSpecies, buildMessages, debugCommand, parseCase, parseReview, parseTurn, publicPreview, requestCompletion
 } from './chat.mjs';
 import {
-  caseDifficulties, caseMessages, caseReview, clinicalHistory, createCase, helperContext,
-  recordReview, recordTurn, reviewNotes
+  caseDifficulties, caseMessages, caseReview, clinicalHistory, createCase, helperContext, nextTurnNumber,
+  recordReview, recordTurn, reviewNotes, rewindCase
 } from './cases.mjs';
 import { openCaseStore } from './case-store.mjs';
 
@@ -17,6 +17,8 @@ const clinicalDrafts = [draft, noteDraft, surgeryDraft, surgeryNoteDraft];
 const assistantDraft = get('assistant-draft');
 const assistantDialog = get('assistant-dialog');
 const systemHelpDialog = get('system-help-dialog');
+const messageEditor = get('message-editor');
+const messageEditorDraft = get('message-editor-draft');
 const tabs = [...document.querySelectorAll('[data-tab]')];
 const reviewButtons = [...document.querySelectorAll('[data-review]')];
 const phaseLabels = { consultation: '接诊中', judgment: '诊断判断', review: '已复盘' };
@@ -36,6 +38,7 @@ let current;
 let activeRequest;
 let selectedTab = 'transcript';
 let systemHistory = [];
+let editingMessage;
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -159,7 +162,9 @@ function renderCase() {
     .filter(Boolean).join(' · ');
   get('messages').replaceChildren();
   get('surgery-messages').replaceChildren();
-  for (const message of caseMessages(current)) {
+  const messages = caseMessages(current);
+  const editable = current.phase !== 'review';
+  for (const message of messages) {
     const surface = message.stage === 'surgery' ? 'surgery-' : '';
     const row = appendMessage(surface, message.role, message.content, message.type, message.note).row;
     const findings = !message.type && message.role === 'assistant' && message.turn
@@ -175,6 +180,7 @@ function renderCase() {
       });
       row.append(button);
     }
+    if (editable) addMessageActions(row, surface, message, message.role === 'user');
   }
   renderResults();
   renderProfile();
@@ -356,6 +362,85 @@ function appendMessage(surface, role, text, type = '', note = '') {
   return { row, body };
 }
 
+function addMessageActions(row, surface, message, canRetry) {
+  const actions = element('div', 'message-actions');
+  const edit = element('button', 'text-button', '修改');
+  const remove = element('button', 'text-button', '删除');
+  edit.type = remove.type = 'button';
+  edit.addEventListener('click', () => {
+    if (activeRequest || messageEditor.open) return;
+    editingMessage = { surface, message };
+    if (message.role === 'user') messageEditorDraft.maxLength = 3000;
+    else messageEditorDraft.removeAttribute('maxlength');
+    messageEditorDraft.value = message.content;
+    messageEditor.showModal();
+  });
+  remove.addEventListener('click', () => {
+    if (!activeRequest && window.confirm('删除这条消息？')) changeMessage(surface, message);
+  });
+  actions.append(edit, remove);
+  if (canRetry) {
+    const retry = element('button', 'text-button', '重试');
+    retry.type = 'button';
+    retry.dataset.retryMessage = '';
+    retry.addEventListener('click', () => retryMessage(surface, message));
+    actions.append(retry);
+  }
+  row.append(actions);
+}
+
+function changeMessage(surface, message, content) {
+  const assistant = surface === 'assistant-';
+  const record = current;
+  if (!assistant && (!record || record.phase === 'review')) return;
+  const history = assistant ? record?.assistantHistory ?? systemHistory : record.history;
+  const index = history.indexOf(message);
+  if (activeRequest || index < 0 || content === message.content) return;
+  const updated = [...history];
+  if (content === undefined) updated.splice(index, 1);
+  else updated[index] = { ...message, content };
+  const panel = messagePanel(surface);
+  const scrollTop = panel.scrollTop;
+  if (!record) {
+    systemHistory = updated;
+    renderAssistant();
+    panel.scrollTop = scrollTop;
+    return;
+  }
+  runRequest(assistant ? 'assistant-' : '', '正在保存…', async signal => {
+    beginSave(signal);
+    current = await store.save(assistant
+      ? { ...record, assistantHistory: updated }
+      : { ...record, history: updated, opening: record.opening ?? history[0]?.content ?? '' });
+    if (assistant) renderAssistant();
+    else renderCase();
+    panel.scrollTop = scrollTop;
+  });
+}
+
+function retryMessage(surface, message) {
+  if (!config || activeRequest || message.role !== 'user') return;
+  if (surface === 'assistant-') {
+    const history = current?.assistantHistory ?? systemHistory;
+    const index = history.indexOf(message);
+    if (index < 0) return;
+    if (index < history.length - 1 && !window.confirm('重试成功后，这条消息之后的对话将被删除。继续重试？')) return;
+    askAssistant(message.content, undefined, index);
+    return;
+  }
+  if (!current || current.phase === 'review' || !current.history.includes(message)) return;
+  const record = rewindCase(current, message);
+  const hasLater = caseMessages(current).at(-1) !== message || record.results.length < current.results.length;
+  if (hasLater && !window.confirm('重试成功后，这条消息之后的接诊和手术对话及相关检查将被删除。继续重试？')) return;
+  if (message.type === 'debug') {
+    runRequest('', '正在重试…', signal =>
+      nextDebug(message.content, debugCommand(message.content) ?? message.content, signal, record));
+    return;
+  }
+  const stage = message.stage === 'surgery' ? 'surgery' : 'consultation';
+  runRequest('', '正在重试…', signal => nextTurn(message.content, message.note ?? '', signal, stage, record));
+}
+
 function scrollMessages(surface) {
   const panel = messagePanel(surface);
   panel.scrollTop = panel.scrollHeight;
@@ -418,6 +503,9 @@ function renderControls() {
   get('retry-case').disabled = !store || !current || busy;
   for (const button of document.querySelectorAll('[data-library], [data-assistant], #assistant-suggestions button')) {
     button.disabled = busy;
+  }
+  for (const button of document.querySelectorAll('.message-actions button')) {
+    button.disabled = busy || (button.hasAttribute('data-retry-message') && !config);
   }
   for (const button of document.querySelectorAll('[data-stop]')) button.hidden = Boolean(activeRequest?.committing);
   get('chat-controls').hidden = selectedTab !== 'transcript';
@@ -510,14 +598,16 @@ async function startCase(settings, signal) {
   enterCase(await store.add(record), 'profile-panel');
 }
 
-async function nextTurn(input, note, signal, stage = 'consultation') {
-  const record = current;
+async function nextTurn(input, note, signal, stage = 'consultation', retryRecord) {
+  const record = retryRecord ?? current;
+  const retry = Boolean(retryRecord);
   const surgery = stage === 'surgery';
   const surface = surgery ? 'surgery-' : '';
   const fields = surgery ? [surgeryDraft, surgeryNoteDraft] : [draft, noteDraft];
-  const turn = record.turns + (record.surgeryTurns ?? 0) + 1;
-  const history = [...clinicalHistory(record, stage), { role: 'user', content: input }];
-  activeRequest.userRow = appendMessage(surface, 'user', input, '', note).row;
+  const turn = retry ? record.history.at(-1).turn : nextTurnNumber(record);
+  const context = retry ? { ...record, history: record.history.slice(0, -1) } : record;
+  const history = [...clinicalHistory(context, stage), { role: 'user', content: input }];
+  if (!retry) activeRequest.userRow = appendMessage(surface, 'user', input, '', note).row;
   if (surgery) renderControls();
   scrollMessages(surface);
   const state = {
@@ -531,9 +621,9 @@ async function nextTurn(input, note, signal, stage = 'consultation') {
     scenario: JSON.stringify(record.settings), dossier: record.dossier, session: state
   }));
   beginSave(signal);
-  current = await store.save(recordTurn(record, input, result, note, stage));
-  if (fields[0].value.trim() === input) fields[0].value = '';
-  if (fields[1].value.trim() === note) fields[1].value = '';
+  current = await store.save(recordTurn(record, input, result, note, stage, retry));
+  if (!retry && fields[0].value.trim() === input) fields[0].value = '';
+  if (!retry && fields[1].value.trim() === note) fields[1].value = '';
   renderCase();
 }
 
@@ -559,12 +649,14 @@ async function finishReview(signal) {
   }
 }
 
-async function nextDebug(text, instruction, signal) {
-  const record = current;
+async function nextDebug(text, instruction, signal, retryRecord) {
+  const record = retryRecord ?? current;
+  const retry = Boolean(retryRecord);
   const request = { role: 'user', content: instruction };
-  activeRequest.userRow = appendMessage('', 'user', text, 'debug').row;
+  if (!retry) activeRequest.userRow = appendMessage('', 'user', text, 'debug').row;
   scrollMessages('');
-  const recentDebug = record.history.filter(message => message.type === 'debug').slice(-8)
+  const previous = retry ? record.history.slice(0, -1) : record.history;
+  const recentDebug = previous.filter(message => message.type === 'debug').slice(-8)
     .map(({ role, content }) => ({ role, content: role === 'user' ? debugCommand(content) ?? content : content }));
   const result = parseTurn(await complete('debug', [...clinicalHistory(record), ...recentDebug, request], {
     scenario: JSON.stringify(record.settings), dossier: record.dossier,
@@ -573,18 +665,22 @@ async function nextDebug(text, instruction, signal) {
   beginSave(signal);
   current = await store.save({
     ...record, history: [...record.history,
-      { role: 'user', content: text, type: 'debug' }, { role: 'assistant', content: result.reply, type: 'debug' }]
+      ...(!retry ? [{ role: 'user', content: text, type: 'debug' }] : []),
+      { role: 'assistant', content: result.reply, type: 'debug' }]
   });
-  if (draft.value.trim() === text) draft.value = '';
+  if (!retry && draft.value.trim() === text) draft.value = '';
   renderCase();
 }
 
 function renderAssistant() {
   get('assistant-messages').replaceChildren();
-  for (const message of current?.assistantHistory ?? systemHistory) {
-    appendMessage('assistant-', message.role, message.content);
+  const history = current?.assistantHistory ?? systemHistory;
+  for (const message of history) {
+    const { row } = appendMessage('assistant-', message.role, message.content);
+    addMessageActions(row, 'assistant-', message, message.role === 'user');
   }
   scrollMessages('assistant-');
+  renderControls();
 }
 
 function showAssistant() {
@@ -606,8 +702,9 @@ function showAssistant() {
   renderAssistant();
 }
 
-function askAssistant(text, answer) {
+function askAssistant(text, answer, retryIndex = -1) {
   if (!text || activeRequest) return;
+  const retry = retryIndex >= 0;
   const question = { role: 'user', content: text };
   if (!current && answer) {
     systemHistory.push(question, { role: 'assistant', content: answer });
@@ -620,23 +717,27 @@ function askAssistant(text, answer) {
   }
   runRequest('assistant-', '正在回复…', async signal => {
     const record = current;
-    const history = [...(record?.assistantHistory ?? systemHistory), question];
-    activeRequest.userRow = appendMessage('assistant-', 'user', text).row;
+    const previous = record?.assistantHistory ?? systemHistory;
+    const history = retry ? previous.slice(0, retryIndex + 1) : [...previous, question];
+    if (!retry) activeRequest.userRow = appendMessage('assistant-', 'user', text).row;
     scrollMessages('assistant-');
     const stage = record ? 'helper' : 'help';
-    const result = parseTurn(await complete(stage, history, { session: helperContext(record) }));
+    const messages = history.map(({ role, content }) => ({ role, content }));
+    const result = parseTurn(await complete(stage, messages, { session: helperContext(record) }));
     if (signal.aborted) throw signal.reason;
-    const updatedHistory = [...history, { role: 'assistant', content: result.reply }];
+    const hintGiven = Boolean(record && record.phase !== 'review' && result.hintGiven === true);
+    const removedHints = retry ? previous.slice(retryIndex + 1).filter(message => message.hintGiven).length : 0;
+    const updatedHistory = [...history, { role: 'assistant', content: result.reply, ...(hintGiven && { hintGiven }) }];
     if (record) {
       beginSave(signal);
       current = await store.save({
         ...record, assistantHistory: updatedHistory,
-        hints: record.hints + Number(record.phase !== 'review' && result.hintGiven === true)
+        hints: Math.max(0, record.hints - removedHints) + Number(hintGiven)
       });
     } else {
       systemHistory = updatedHistory;
     }
-    if (assistantDraft.value.trim() === text) assistantDraft.value = '';
+    if (!retry && assistantDraft.value.trim() === text) assistantDraft.value = '';
     renderAssistant();
   });
 }
@@ -671,20 +772,20 @@ form.addEventListener('submit', event => {
 });
 get('chat-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (!config || !current || activeRequest) return;
+  if (!config || !current || current.phase === 'review' || activeRequest) return;
   const text = draft.value.trim();
   if (!text) return;
   const instruction = debugCommand(text);
   if (instruction) {
     runRequest('', '正在处理…', signal => nextDebug(text, instruction, signal));
-  } else if (current.phase !== 'review') {
-    if (current.settings.turnLimit && current.turns >= current.settings.turnLimit) {
-      feedback('', '已达到轮次上限。可以结束接诊并复盘。');
-      return;
-    }
-    const note = noteDraft.value.trim();
-    runRequest('', '等待家长回复…', signal => nextTurn(text, note, signal));
+    return;
   }
+  if (current.settings.turnLimit && current.turns >= current.settings.turnLimit) {
+    feedback('', '已达到轮次上限。可以结束接诊并复盘。');
+    return;
+  }
+  const note = noteDraft.value.trim();
+  runRequest('', '等待家长回复…', signal => nextTurn(text, note, signal));
 });
 get('surgery-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -709,6 +810,20 @@ get('assistant-form').addEventListener('submit', event => {
   event.preventDefault();
   askAssistant(assistantDraft.value.trim());
 });
+get('message-editor-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const content = messageEditorDraft.value.trim();
+  messageEditorDraft.setCustomValidity(content ? '' : '请输入消息内容。');
+  if (!messageEditorDraft.reportValidity() || !editingMessage) return;
+  const { surface, message } = editingMessage;
+  messageEditor.close();
+  changeMessage(surface, message, content);
+});
+messageEditorDraft.addEventListener('input', () => messageEditorDraft.setCustomValidity(''));
+messageEditor.addEventListener('close', () => {
+  messageEditorDraft.setCustomValidity('');
+  editingMessage = undefined;
+});
 assistantDialog.addEventListener('close', () => {
   if (activeRequest?.surface === 'assistant-' && !activeRequest.committing) activeRequest.controller.abort();
 });
@@ -731,9 +846,9 @@ get('delete-case').addEventListener('click', () => {
 });
 get('retry-case').addEventListener('click', () => {
   if (!store || !current || activeRequest) return;
-  const { settings, dossier, history, profile } = current;
+  const { settings, dossier, history, profile, opening } = current;
   runRequest('', '正在复制病例…', async signal => {
-    const record = createCase(settings, dossier, history[0].content, profile);
+    const record = createCase(settings, dossier, opening ?? history[0]?.content ?? '', profile);
     beginSave(signal, '正在复制病例…');
     enterCase(await store.add(record));
   });
