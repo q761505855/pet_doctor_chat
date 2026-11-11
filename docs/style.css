@@ -1,4 +1,5 @@
 :root {
+  overscroll-behavior-x: none;
   color-scheme: light;
   font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #183832;
@@ -222,14 +223,21 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .case-tabs button[aria-pressed=true] { border-color: var(--teal); color: var(--teal); font-weight: 730; }
 .count { padding: 2px 5px; }
 
+#clinic:has(> .transcript:not([hidden])), #assistant-dialog, #message-editor,
+.transcript, .assistant-scroll {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  touch-action: pan-y pinch-zoom;
+}
 .transcript, .assistant-scroll { padding: 17px 16px; }
-.messages { display: grid; gap: 17px; }
+.messages { display: grid; grid-template-columns: minmax(0, 1fr); gap: 17px; }
 .message { min-width: 0; display: grid; gap: 5px; justify-items: start; }
 .message.doctor { justify-items: end; }
 .message-identity { color: var(--muted); font-size: .76rem; padding-inline: 4px; }
 .message-actions { display: flex; flex-wrap: wrap; gap: 2px; }
 .message-actions button { min-height: 34px; padding-inline: 8px; font-size: .76rem; }
 .bubble {
+  min-width: 0;
   max-width: 92%;
   padding: 11px 13px;
   background: var(--white);
@@ -239,6 +247,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   font-size: .94rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .doctor .bubble { background: var(--teal); border-color: var(--teal); color: var(--white); border-radius: 16px 4px 16px 16px; }
 .message-note {
