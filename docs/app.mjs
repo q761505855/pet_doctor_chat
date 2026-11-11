@@ -16,6 +16,7 @@ const surgeryNoteDraft = get('surgery-note-draft');
 const clinicalDrafts = [draft, noteDraft, surgeryDraft, surgeryNoteDraft];
 const assistantDraft = get('assistant-draft');
 const assistantDialog = get('assistant-dialog');
+const systemHelpDialog = get('system-help-dialog');
 const tabs = [...document.querySelectorAll('[data-tab]')];
 const reviewButtons = [...document.querySelectorAll('[data-review]')];
 const phaseLabels = { consultation: '接诊中', judgment: '诊断判断', review: '已复盘' };
@@ -23,9 +24,10 @@ const resultTypes = { physical: '体格检查', test: '辅助检查' };
 const reportFlags = { normal: '正常', high: '↑ 偏高', low: '↓ 偏低', abnormal: '异常' };
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' });
 const systemTopics = [
-  ['如何开始接诊？', '在病例管理页点「新建病例」，设置好后点「生成病例」。查看宠物和主人档案后，点「开始接诊」。你扮演兽医，AI 扮演宠物家长。'],
-  ['检查和复盘在哪看？', '在「接诊」中输入要执行的检查，报告会进入同一病例的「检查」。点「结束接诊并复盘」后，在「复盘」查看报告和每轮备注的评价。'],
-  ['病例保存在哪里？', '病例、报告、对话和复盘保存在当前浏览器。回到病例管理后，点病例即可续诊。清除站点数据会清除本机病例。']
+  ['如何开始接诊？', '先在「病例管理」点「新建病例」。如果还没想好练什么，病例范围可以留空，两个难度也都能选「随机」。点「生成病例」，看过宠物和家长的档案，再点「开始接诊」。你来当兽医，AI 扮演宠物家长。'],
+  ['如何重试同一个病例？', '想把同一个病例再练一遍，可以打开「档案」，点「删除病例」下方的「重试」。你会用同一份病例资料，从家长的第一句话重新开始。之前那一轮还可以在病例列表里找到。'],
+  ['检查和复盘在哪看？', '做完检查后，点同一个病例里的「检查」就能看报告。练完后点「结束接诊并复盘」，再去「复盘」看反馈。你每轮写下的备注也会在那里得到评价。'],
+  ['病例保存在哪里？', '病例和练习记录都存在你现在用的浏览器里。想接着练，回到「病例管理」，点开原来的病例就行。清除这个网站的浏览器数据也会清掉本机病例。']
 ];
 let store;
 let config;
@@ -115,7 +117,7 @@ async function openCase(id) {
   if (activeRequest) return;
   try {
     const record = await store.get(id);
-    if (get('library').hidden || activeRequest || assistantDialog.open) return;
+    if (get('library').hidden || activeRequest || assistantDialog.open || systemHelpDialog.open) return;
     if (!record) {
       await loadLibrary();
       libraryError('这份病例已删除。');
@@ -335,7 +337,7 @@ function appendMessage(surface, role, text, type = '', note = '') {
   const outgoing = role === 'user';
   const assistant = surface === 'assistant-';
   const label = outgoing ? (assistant ? '你' : '你 · 兽医') :
-    assistant ? (current ? '病例助手' : '系统帮助') :
+    assistant ? (current ? '病例助手' : '助手') :
       surface === 'surgery-' ? '手术模拟' :
       type === 'debug' ? '系统调试' : '宠物家长';
   const row = element('article', `message ${outgoing ? 'doctor' : 'owner'} ${type}`);
@@ -369,11 +371,18 @@ function refreshPersona() {
 
 function readSettings() {
   const data = new FormData(form);
+  const selectedDifficulty = data.get('difficulty');
+  let difficulty = selectedDifficulty;
+  if (selectedDifficulty === '随机') {
+    const levels = Array.from(form.elements.difficulty.options, option => option.value)
+      .filter(level => level !== '随机');
+    difficulty = levels[Math.floor(Math.random() * levels.length)];
+  }
   return {
     scopeDetail: data.get('scopeDetail').trim(),
     caseDifficulty: data.get('caseDifficulty'),
-    difficulty: data.get('difficulty'),
-    persona: data.get('difficulty') === '难缠家长' ? data.get('persona') : '',
+    difficulty,
+    persona: selectedDifficulty === '难缠家长' ? data.get('persona') : '',
     emergency: data.has('emergency'),
     treatment: data.has('treatment'),
     comorbidity: data.has('comorbidity')
@@ -401,9 +410,12 @@ function renderControls() {
   get('reviewed').hidden = !reviewed;
   get('chat-form').hidden = reviewed;
   get('surgery-form').hidden = reviewed;
+  get('surgery-empty').hidden = get('surgery-messages').childElementCount > 0;
+  get('surgery-empty-hint').hidden = reviewed;
   draft.placeholder = limited ? '已达到轮次上限，可以结束接诊并复盘' : '问病史、安排检查或给出诊断判断…';
   get('assistant-send').disabled = !config || busy || !assistantDraft.value.trim();
   get('delete-case').disabled = busy;
+  get('retry-case').disabled = !store || !current || busy;
   for (const button of document.querySelectorAll('[data-library], [data-assistant], #assistant-suggestions button')) {
     button.disabled = busy;
   }
@@ -506,6 +518,7 @@ async function nextTurn(input, note, signal, stage = 'consultation') {
   const turn = record.turns + (record.surgeryTurns ?? 0) + 1;
   const history = [...clinicalHistory(record, stage), { role: 'user', content: input }];
   activeRequest.userRow = appendMessage(surface, 'user', input, '', note).row;
+  if (surgery) renderControls();
   scrollMessages(surface);
   const state = {
     phase: record.phase,
@@ -576,11 +589,10 @@ function renderAssistant() {
 
 function showAssistant() {
   const active = Boolean(current);
-  get('assistant-title').textContent = active ? '病例助手' : '系统帮助';
-  get('system-guide').hidden = active;
+  get('assistant-title').textContent = active ? '病例助手' : '助手';
   get('assistant-intro').textContent = active
-    ? `根据「${caseTitle(current)}」的接诊记录与已出报告提供提示。`
-    : '有其他使用问题，可以在下方提问。';
+    ? `如果接诊「${caseTitle(current)}」时卡住了，可以和我一起看看下一步怎么问。`
+    : '第一次来，或者找不到某个入口？告诉我你想做什么，我陪你一步步找。';
   assistantDraft.placeholder = active ? '问当前病例的接诊思路…' : '输入平台使用问题…';
   const topics = active ? [['下一步怎么问？'], ['这份病例还漏了哪些信息？']] : systemTopics;
   get('assistant-suggestions').replaceChildren(...topics.map(([question, answer]) => {
@@ -592,7 +604,6 @@ function showAssistant() {
   feedback('assistant-', configError, Boolean(configError));
   assistantDialog.showModal();
   renderAssistant();
-  if (!active) get('assistant-scroll').scrollTop = 0;
 }
 
 function askAssistant(text, answer) {
@@ -638,6 +649,10 @@ get('new-case').addEventListener('click', () => {
   feedback('create-', configError || (config ? '' : '正在加载配置…'), Boolean(configError));
 });
 for (const button of document.querySelectorAll('[data-library]')) button.addEventListener('click', showLibrary);
+get('open-system-help').addEventListener('click', () => {
+  systemHelpDialog.showModal();
+  get('system-guide').scrollTop = 0;
+});
 for (const button of document.querySelectorAll('[data-assistant]')) button.addEventListener('click', showAssistant);
 for (const button of document.querySelectorAll('[data-stop]')) {
   button.addEventListener('click', () => activeRequest?.controller.abort());
@@ -712,6 +727,15 @@ get('delete-case').addEventListener('click', () => {
     beginSave(signal, '正在删除病例…');
     await store.remove(current.id, current.revision);
     await showLibrary();
+  });
+});
+get('retry-case').addEventListener('click', () => {
+  if (!store || !current || activeRequest) return;
+  const { settings, dossier, history, profile } = current;
+  runRequest('', '正在复制病例…', async signal => {
+    const record = createCase(settings, dossier, history[0].content, profile);
+    beginSave(signal, '正在复制病例…');
+    enterCase(await store.add(record));
   });
 });
 

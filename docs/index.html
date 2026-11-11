@@ -14,7 +14,10 @@
     <section id="library" class="screen" aria-labelledby="library-title">
       <header class="topbar">
         <span class="brand"><span class="brand-mark" aria-hidden="true">+</span>宠物问诊室</span>
-        <button class="soft" data-assistant type="button">系统帮助</button>
+        <div class="library-actions">
+          <button id="open-system-help" class="soft" type="button" aria-haspopup="dialog" aria-controls="system-help-dialog">系统帮助</button>
+          <button class="soft" data-assistant type="button" aria-haspopup="dialog" aria-controls="assistant-dialog">助手</button>
+        </div>
       </header>
       <div class="scroll library-content">
         <section class="library-hero">
@@ -63,6 +66,7 @@
                 <option value="普通型" selected>普通型 · 随机人设</option>
                 <option value="高难度型">高难度 · 信息零散</option>
                 <option value="难缠家长">难缠家长 · 沟通挑战</option>
+                <option value="随机">随机 · 任选家长难度</option>
               </select>
               <select id="persona" name="persona" aria-label="指定家长人设" hidden>
                 <option value="">随机抽取人设</option>
@@ -74,9 +78,18 @@
             <details class="form-card advanced">
               <summary>更多训练选项</summary>
               <div class="advanced-fields">
-                <label class="check"><input type="checkbox" name="emergency"> 急诊时间压力</label>
-                <label class="check"><input type="checkbox" name="treatment" checked> 治疗沟通</label>
-                <label class="check"><input type="checkbox" name="comorbidity"> 双病共存</label>
+                <div>
+                  <label class="check"><input type="checkbox" name="emergency" aria-describedby="emergency-hint"> 急诊时间压力</label>
+                  <p class="option-hint" id="emergency-hint">练习在病情可能变化时，判断哪些处置和检查要优先做。</p>
+                </div>
+                <div>
+                  <label class="check"><input type="checkbox" name="treatment" aria-describedby="treatment-hint" checked> 治疗沟通</label>
+                  <p class="option-hint" id="treatment-hint">练习向家长解释治疗方案、风险和后续安排。</p>
+                </div>
+                <div>
+                  <label class="check"><input type="checkbox" name="comorbidity" aria-describedby="comorbidity-hint"> 双病共存</label>
+                  <p class="option-hint" id="comorbidity-hint">练习区分同一只宠物的两种疾病，并决定先处理哪一种。</p>
+                </div>
               </div>
             </details>
           </fieldset>
@@ -113,6 +126,11 @@
         <div class="messages" id="messages" role="log" aria-label="接诊对话"></div>
       </div>
       <div id="surgery-panel" class="scroll transcript" tabindex="0" aria-label="手术记录" hidden>
+        <div id="surgery-empty" class="empty">
+          <span class="empty-icon file-icon" aria-hidden="true"></span>
+          <h2>暂无手术记录</h2>
+          <p id="surgery-empty-hint">需要手术时，可以在下方说明手术计划，或输入本轮要执行的操作。如果还在评估或无需手术，回到「接诊」继续即可。</p>
+        </div>
         <div class="messages" id="surgery-messages" role="log" aria-label="手术演练"></div>
       </div>
       <div id="results-panel" class="scroll panel" tabindex="0" aria-label="检查结果" hidden>
@@ -126,6 +144,7 @@
       <div id="profile-panel" class="scroll panel" tabindex="0" aria-label="病例档案" hidden>
         <div id="profile-content"></div>
         <button type="button" id="delete-case" class="danger wide">删除病例</button>
+        <button type="button" id="retry-case" class="soft wide">重试</button>
       </div>
       <div id="review-panel" class="scroll panel" tabindex="0" aria-label="复盘报告" hidden>
         <div id="review-empty" class="empty">
@@ -172,23 +191,61 @@
     </section>
   </main>
 
+  <dialog id="system-help-dialog" aria-labelledby="system-help-title">
+    <div class="dialog-content">
+      <header class="topbar subpage">
+        <h2 id="system-help-title">系统帮助</h2>
+        <form method="dialog"><button class="soft close" aria-label="关闭系统帮助" autofocus>×</button></form>
+      </header>
+      <div class="scroll guide-content" id="system-guide" tabindex="0" aria-label="使用指南">
+        <p>你扮演兽医，AI 扮演宠物家长，并模拟检查结果和手术现场。一次练习可以覆盖问诊、诊断、治疗沟通和复盘。</p>
+        <section class="guide-section">
+          <h3>新建病例</h3>
+          <p>在「病例管理」点「新建病例」。病例范围可留空，也可以写「猫、呕吐」或指定想练的病种和场景。</p>
+          <ul>
+            <li><strong>病例难度</strong>决定临床复杂度。入门练常见门诊，中等可能需要进一步检查或判断是否手术，高难涉及老年、神经内科等复杂情况。选随机可在三个档位中抽取。</li>
+            <li><strong>家长难度</strong>决定沟通挑战。可选配合型、普通型、高难度型或难缠家长，也可选「随机」从四档中抽取。手动选择「难缠家长」时还可以指定人设。</li>
+          </ul>
+          <h4 class="guide-subheading">更多训练选项</h4>
+          <p>三个选项可以同时使用。治疗沟通默认开启，其余两项可按需勾选。</p>
+          <ul>
+            <li><strong>急诊时间压力</strong>用于练习急症中的处置顺序。模拟病情会随进展和处置变化，你需要判断哪些事要先做、哪些检查可以稍后做。页面没有倒计时。</li>
+            <li><strong>治疗沟通</strong>用于练习向家长解释方案、风险和后续安排，并回应顾虑。关闭后，家长会简短回应你的诊断判断。</li>
+            <li><strong>双病共存</strong>让同一只宠物同时有两种疾病。你需要判断哪些表现与哪种病有关、哪种病要优先处理，以及两种病如何影响治疗选择。</li>
+          </ul>
+          <p>点「生成病例」后，先在「档案」查看宠物和照护者资料，再点「开始接诊」。</p>
+        </section>
+        <section class="guide-section">
+          <h3>接诊与检查</h3>
+          <p>在「接诊」用自然语言问病史、安排检查、做处置或向家长解释判断。家长会根据自己见过的情况和你实际告诉他的信息回应。</p>
+          <p>要做检查时，明确写出要执行的项目，例如「我现在测体温，并做腹部超声」。本轮出的报告可在「检查」查看。上方的「想法 / 备注」供自己记录推理，复盘时会单独评价。</p>
+        </section>
+        <section class="guide-section">
+          <h3>手术与术后沟通</h3>
+          <p>根据病史和检查判断要不要手术、何时做、选什么术式。在「手术」页可以讨论方案，也可以逐轮输入明确执行的操作，查看模拟的术中所见或监护变化。该页也有独立的「想法 / 备注」。</p>
+          <p>术中有变化时可以切回「接诊」告知家长、征询意见，再回到「手术」继续。术后也可向家长解释结果与后续安排。无需手术时，可以直接继续接诊或进入复盘。</p>
+        </section>
+        <section class="guide-section">
+          <h3>结束接诊与复盘</h3>
+          <p>点「结束接诊并复盘」，在「复盘」查看病例诊断、评分、关键线索、处置和沟通反馈，以及逐条的备注评价。做过手术练习时，复盘也会评价手术决策与操作。</p>
+        </section>
+        <section class="guide-section">
+          <h3>使用助手与管理病例</h3>
+          <p>在主界面点「助手」，可以问怎么新建病例、继续接诊或查看复盘。接诊时如果卡住，可以问「病例助手」接下来该问什么、还需要确认哪些信息。复盘会记录使用提示的次数。</p>
+          <p>病例保存在当前浏览器。回到「病例管理」可以重新打开，从原进度继续或重看复盘。可在「档案」删除病例，清除浏览器站点数据也会清除本机病例。</p>
+          <p>想用同一个病例再练一次，在「档案」的「删除病例」下方点「重试」。系统直接复制原病例的病情、宠物、家长和设置，沿用原开场开始一轮新接诊。原病例及练习记录仍可在病例列表查看。</p>
+        </section>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="assistant-dialog" aria-labelledby="assistant-title">
     <div class="dialog-content">
       <header class="topbar subpage">
-        <h2 id="assistant-title">系统帮助</h2>
+        <h2 id="assistant-title">助手</h2>
         <form method="dialog"><button class="soft close" aria-label="关闭助手" autofocus>×</button></form>
       </header>
       <div class="scroll assistant-scroll" id="assistant-scroll">
-        <div id="system-guide" class="system-guide" hidden>
-          <p>你扮演兽医，AI 扮演宠物家长。通过模拟问诊练习病史采集、诊断判断和与不同性格的家长沟通。</p>
-          <ol>
-            <li><strong>新建病例。</strong> 病例范围可留空。分别选择病例难度和家长难度，也可以开启急诊时间压力、治疗沟通或双病共存。</li>
-            <li><strong>开始接诊。</strong> 先看宠物和照护者档案，再用自然语言问病史、安排检查、解释判断或商量方案。报告当轮归档到「检查」。可以记录每轮想法，卡住时打开「病例助手」获取提示。</li>
-            <li><strong>按需练习手术。</strong> 到「手术」描述方案或逐轮执行。术中可切回「接诊」告知家长、征询意见，再继续原来的手术进度。术后也可回到「接诊」说明结果。无需手术时可留空。</li>
-            <li><strong>结束接诊并复盘。</strong> 在「复盘」查看诊断、评分、问诊与沟通反馈，以及每轮备注的评价。</li>
-          </ol>
-          <p>病例保存在当前浏览器，回到「病例管理」可以重新打开。</p>
-        </div>
         <p id="assistant-intro" class="page-intro"></p>
         <div class="suggestions" id="assistant-suggestions"></div>
         <div class="messages" id="assistant-messages" role="log" aria-label="助手对话"></div>

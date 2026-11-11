@@ -18,8 +18,7 @@ export function caseProfile(dossier) {
   };
 }
 
-export function createCase(settings, dossier, opening) {
-  const profile = caseProfile(dossier);
+export function createCase(settings, dossier, opening, profile = caseProfile(dossier)) {
   if (!profile.pet.name || !profile.owners[0]?.name) {
     throw new Error('模型返回的档案不完整，缺少宠物名字或主要联系人。请重新生成。');
   }
