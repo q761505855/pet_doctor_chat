@@ -204,7 +204,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .case-heading p { font-size: .75rem; color: var(--muted); margin-top: 3px; }
 .case-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   background: var(--white);
   border-bottom: 1px solid var(--line);
 }
@@ -294,7 +294,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   padding-top: 12px;
   border-top: 1px solid #ffffff45;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
   gap: 6px;
 }
 .review-stats dt { font-size: .73rem; color: #e2f1e9; }
@@ -328,7 +328,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 .compose-box { display: flex; gap: 8px; align-items: end; }
 .consultation-form { display: grid; gap: 6px; }
-#note-draft { min-height: 40px; padding-block: 8px; background: #fbf7ee; }
+#note-draft, #surgery-note-draft { min-height: 40px; padding-block: 8px; background: #fbf7ee; }
 textarea { display: block; resize: none; line-height: 1.35; }
 .send { width: 47px; min-height: 46px; flex: none; font-size: 1.3rem; }
 .review-button { display: block; margin-inline: auto; min-height: 41px; font-size: .8rem; }

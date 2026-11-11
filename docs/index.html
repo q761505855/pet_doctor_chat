@@ -50,6 +50,13 @@
             <div class="form-card">
               <label for="scope-detail">病例范围（选填）</label>
               <input id="scope-detail" name="scopeDetail" placeholder="留空随机，例如：猫、呕吐、急诊" maxlength="180">
+              <label for="case-difficulty">病例难度</label>
+              <select id="case-difficulty" name="caseDifficulty">
+                <option value="入门">入门 · 常见门诊病例</option>
+                <option value="中等">中等 · 进阶检查与手术判断</option>
+                <option value="高难">高难 · 老年、神经或复杂病例</option>
+                <option value="随机" selected>随机 · 任选病例难度</option>
+              </select>
               <label for="difficulty">家长难度</label>
               <select id="difficulty" name="difficulty">
                 <option value="配合型">配合型 · 信息清楚</option>
@@ -98,11 +105,15 @@
       <nav class="case-tabs" aria-label="病例内容">
         <button type="button" data-tab="transcript" aria-controls="transcript" aria-pressed="true">接诊</button>
         <button type="button" data-tab="results-panel" aria-controls="results-panel" aria-pressed="false">检查 <span id="result-count" class="count" hidden></span></button>
+        <button type="button" data-tab="surgery-panel" aria-controls="surgery-panel" aria-pressed="false">手术</button>
         <button type="button" data-tab="profile-panel" aria-controls="profile-panel" aria-pressed="false">档案</button>
         <button type="button" data-tab="review-panel" aria-controls="review-panel" aria-pressed="false">复盘</button>
       </nav>
       <div id="transcript" class="scroll transcript" tabindex="0" aria-label="接诊记录">
         <div class="messages" id="messages" role="log" aria-label="接诊对话"></div>
+      </div>
+      <div id="surgery-panel" class="scroll transcript" tabindex="0" aria-label="手术记录" hidden>
+        <div class="messages" id="surgery-messages" role="log" aria-label="手术演练"></div>
       </div>
       <div id="results-panel" class="scroll panel" tabindex="0" aria-label="检查结果" hidden>
         <div id="results-empty" class="empty">
@@ -145,6 +156,18 @@
           <button class="text-button review-button" data-review type="button">结束接诊并复盘</button>
           <button class="text-button review-button" id="reviewed" type="button" hidden>查看复盘报告 ›</button>
         </div>
+        <div id="surgery-controls" hidden>
+          <form id="surgery-form" class="consultation-form">
+            <label for="surgery-note-draft" class="sr-only">本轮手术想法或备注</label>
+            <textarea id="surgery-note-draft" rows="1" maxlength="1200" placeholder="想法 / 备注（选填，仅用于复盘）"></textarea>
+            <div class="compose-box">
+              <label for="surgery-draft" class="sr-only">手术计划或实际操作</label>
+              <textarea id="surgery-draft" rows="2" maxlength="3000" placeholder="说明手术计划，或输入本轮实际操作…"></textarea>
+              <button class="primary send" type="submit" id="surgery-send" aria-label="发送手术消息" disabled>↑</button>
+            </div>
+          </form>
+          <button class="text-button review-button" data-review type="button">结束接诊并复盘</button>
+        </div>
       </footer>
     </section>
   </main>
@@ -159,8 +182,9 @@
         <div id="system-guide" class="system-guide" hidden>
           <p>你扮演兽医，AI 扮演宠物家长。通过模拟问诊练习病史采集、诊断判断和与不同性格的家长沟通。</p>
           <ol>
-            <li><strong>新建病例。</strong> 指定想练的病例范围，或留空随机生成。选择家长难度，也可以开启急诊时间压力、治疗沟通或双病共存。</li>
+            <li><strong>新建病例。</strong> 病例范围可留空。分别选择病例难度和家长难度，也可以开启急诊时间压力、治疗沟通或双病共存。</li>
             <li><strong>开始接诊。</strong> 先看宠物和照护者档案，再用自然语言问病史、安排检查、解释判断或商量方案。报告当轮归档到「检查」。可以记录每轮想法，卡住时打开「病例助手」获取提示。</li>
+            <li><strong>按需练习手术。</strong> 到「手术」描述方案或逐轮执行。术中可切回「接诊」告知家长、征询意见，再继续原来的手术进度。术后也可回到「接诊」说明结果。无需手术时可留空。</li>
             <li><strong>结束接诊并复盘。</strong> 在「复盘」查看诊断、评分、问诊与沟通反馈，以及每轮备注的评价。</li>
           </ol>
           <p>病例保存在当前浏览器，回到「病例管理」可以重新打开。</p>

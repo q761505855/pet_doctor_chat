@@ -2,7 +2,8 @@ import {
   allowsCaseSpecies, buildMessages, debugCommand, parseCase, parseReview, parseTurn, publicPreview, requestCompletion
 } from './chat.mjs';
 import {
-  caseMessages, caseReview, consultationHistory, createCase, helperContext, recordReview, recordTurn, reviewNotes
+  caseDifficulties, caseMessages, caseReview, clinicalHistory, createCase, helperContext,
+  recordReview, recordTurn, reviewNotes
 } from './cases.mjs';
 import { openCaseStore } from './case-store.mjs';
 
@@ -10,6 +11,9 @@ const get = id => document.getElementById(id);
 const form = get('settings');
 const draft = get('draft');
 const noteDraft = get('note-draft');
+const surgeryDraft = get('surgery-draft');
+const surgeryNoteDraft = get('surgery-note-draft');
+const clinicalDrafts = [draft, noteDraft, surgeryDraft, surgeryNoteDraft];
 const assistantDraft = get('assistant-draft');
 const assistantDialog = get('assistant-dialog');
 const tabs = [...document.querySelectorAll('[data-tab]')];
@@ -100,8 +104,7 @@ async function loadLibrary() {
 
 async function showLibrary() {
   current = undefined;
-  draft.value = '';
-  noteDraft.value = '';
+  for (const field of clinicalDrafts) field.value = '';
   assistantDraft.value = '';
   showScreen('library');
   libraryError();
@@ -126,8 +129,7 @@ async function openCase(id) {
 
 function enterCase(record, initialTab = 'transcript') {
   current = record;
-  draft.value = '';
-  noteDraft.value = '';
+  for (const field of clinicalDrafts) field.value = '';
   assistantDraft.value = '';
   feedback('', configError, Boolean(configError));
   selectTab(initialTab);
@@ -145,14 +147,19 @@ function selectTab(id) {
     get(button.dataset.tab).hidden = !selected;
   }
   renderControls();
+  if (id === 'surgery-panel') scrollMessages('surgery-');
 }
 
 function renderCase() {
   get('clinic-title').textContent = caseTitle(current);
-  get('session-summary').textContent = [petLine(current), phaseLabels[current.phase]].filter(Boolean).join(' · ');
+  const difficulty = current.settings.caseDifficulty;
+  get('session-summary').textContent = [petLine(current), difficulty && `病例 ${difficulty}`, phaseLabels[current.phase]]
+    .filter(Boolean).join(' · ');
   get('messages').replaceChildren();
+  get('surgery-messages').replaceChildren();
   for (const message of caseMessages(current)) {
-    const row = appendMessage('', message.role, message.content, message.type, message.note).row;
+    const surface = message.stage === 'surgery' ? 'surgery-' : '';
+    const row = appendMessage(surface, message.role, message.content, message.type, message.note).row;
     const findings = !message.type && message.role === 'assistant' && message.turn
       ? current.results.filter(result => result.turn === message.turn) : [];
     if (findings.length) {
@@ -172,6 +179,7 @@ function renderCase() {
   renderReview();
   renderControls();
   if (selectedTab === 'transcript') scrollMessages('');
+  if (selectedTab === 'surgery-panel') scrollMessages('surgery-');
 }
 
 function renderReview() {
@@ -196,7 +204,9 @@ function renderReview() {
   overview.append(heading);
   if (report.summary) overview.append(element('p', 'review-summary', report.summary));
   const stats = element('dl', 'review-stats');
-  for (const [label, value] of [['接诊轮次', current.turns], ['检查项目', current.results.length], ['助手提示', current.hints]]) {
+  const counts = [['接诊轮次', current.turns], ['检查项目', current.results.length], ['助手提示', current.hints]];
+  if (current.surgeryTurns) counts.splice(1, 0, ['手术轮次', current.surgeryTurns]);
+  for (const [label, value] of counts) {
     const stat = element('div');
     stat.append(element('dt', '', label), element('dd', '', String(value)));
     stats.append(stat);
@@ -222,10 +232,12 @@ function renderReview() {
   if (report.noteFeedback.length) {
     const feedback = element('section', 'review-card');
     feedback.append(element('h3', '', '想法与备注评价'));
-    const notes = new Map(reviewNotes(current).map(item => [item.turn, item.note]));
+    const notes = new Map(reviewNotes(current).map(item => [item.turn, item]));
     for (const { turn, feedback: assessment } of report.noteFeedback) {
       const evaluation = element('section', 'review-note');
-      evaluation.append(element('h4', '', `第 ${turn} 轮`), element('blockquote', '', notes.get(turn)));
+      const note = notes.get(turn);
+      evaluation.append(element('h4', '', `${note?.stage === 'surgery' ? '手术 · ' : ''}第 ${turn} 轮`),
+        element('blockquote', '', note?.note));
       appendFormatted(evaluation, assessment);
       feedback.append(evaluation);
     }
@@ -321,8 +333,10 @@ function appendFormatted(body, content) {
 
 function appendMessage(surface, role, text, type = '', note = '') {
   const outgoing = role === 'user';
-  const label = outgoing ? (surface ? '你' : '你 · 兽医') :
-    surface ? (current ? '病例助手' : '系统帮助') :
+  const assistant = surface === 'assistant-';
+  const label = outgoing ? (assistant ? '你' : '你 · 兽医') :
+    assistant ? (current ? '病例助手' : '系统帮助') :
+      surface === 'surgery-' ? '手术模拟' :
       type === 'debug' ? '系统调试' : '宠物家长';
   const row = element('article', `message ${outgoing ? 'doctor' : 'owner'} ${type}`);
   const identity = element('div', 'message-identity', label);
@@ -336,13 +350,17 @@ function appendMessage(surface, role, text, type = '', note = '') {
     row.append(annotation);
   }
   row.append(body);
-  get(surface ? 'assistant-messages' : 'messages').append(row);
+  get(surface + 'messages').append(row);
   return { row, body };
 }
 
 function scrollMessages(surface) {
-  const panel = get(surface ? 'assistant-scroll' : 'transcript');
+  const panel = messagePanel(surface);
   panel.scrollTop = panel.scrollHeight;
+}
+
+function messagePanel(surface) {
+  return get(surface === 'assistant-' ? 'assistant-scroll' : surface === 'surgery-' ? 'surgery-panel' : 'transcript');
 }
 
 function refreshPersona() {
@@ -353,6 +371,7 @@ function readSettings() {
   const data = new FormData(form);
   return {
     scopeDetail: data.get('scopeDetail').trim(),
+    caseDifficulty: data.get('caseDifficulty'),
     difficulty: data.get('difficulty'),
     persona: data.get('difficulty') === '难缠家长' ? data.get('persona') : '',
     emergency: data.has('emergency'),
@@ -365,6 +384,7 @@ function renderControls() {
   const busy = Boolean(activeRequest);
   const canRequest = Boolean(config && store) && !busy;
   const reviewed = current?.phase === 'review';
+  const inSurgery = selectedTab === 'surgery-panel';
   const limited = current?.settings.turnLimit && current.turns >= current.settings.turnLimit;
   const showStart = selectedTab === 'profile-panel' && current?.phase === 'consultation' && current.turns === 0;
   get('new-case').disabled = !store || busy;
@@ -373,12 +393,14 @@ function renderControls() {
   get('start-consultation').hidden = !showStart;
   get('start-consultation').disabled = busy;
   get('send').disabled = !canRequest || !current || !draft.value.trim() || reviewed;
+  get('surgery-send').disabled = !canRequest || !current || !surgeryDraft.value.trim() || reviewed;
   for (const button of reviewButtons) {
     button.hidden = reviewed;
     button.disabled = !canRequest;
   }
   get('reviewed').hidden = !reviewed;
   get('chat-form').hidden = reviewed;
+  get('surgery-form').hidden = reviewed;
   draft.placeholder = limited ? '已达到轮次上限，可以结束接诊并复盘' : '问病史、安排检查或给出诊断判断…';
   get('assistant-send').disabled = !config || busy || !assistantDraft.value.trim();
   get('delete-case').disabled = busy;
@@ -387,7 +409,8 @@ function renderControls() {
   }
   for (const button of document.querySelectorAll('[data-stop]')) button.hidden = Boolean(activeRequest?.committing);
   get('chat-controls').hidden = selectedTab !== 'transcript';
-  get('composer').hidden = selectedTab !== 'transcript' && !showStart &&
+  get('surgery-controls').hidden = !inSurgery || reviewed;
+  get('composer').hidden = selectedTab !== 'transcript' && (!inSurgery || reviewed) && !showStart &&
     activeRequest?.surface !== '' && get('feedback').hidden;
 }
 
@@ -415,14 +438,15 @@ function showPartial(request, stage, text) {
     get('create-preview').hidden = false;
     return;
   }
-  const panel = get(request.surface ? 'assistant-scroll' : 'transcript');
+  const surface = stage === 'surgery' ? 'surgery-' : request.surface;
+  const panel = messagePanel(surface);
   const follow = !request.preview || panel.scrollHeight - panel.scrollTop - panel.clientHeight < 64;
   if (!request.preview) {
-    request.preview = appendMessage(request.surface, 'assistant', '', stage === 'consultation' ? '' : stage);
+    request.preview = appendMessage(surface, 'assistant', '', stage === 'consultation' ? '' : stage);
     request.preview.row.setAttribute('aria-hidden', 'true');
   }
   request.preview.body.textContent = visible;
-  if (follow) scrollMessages(request.surface);
+  if (follow) scrollMessages(surface);
 }
 
 async function runRequest(surface, loading, task) {
@@ -455,54 +479,66 @@ function beginSave(signal, label = '正在保存到本机…') {
 }
 
 async function startCase(settings, signal) {
+  const random = settings.caseDifficulty === '随机';
+  const preferredCaseDifficulty = random
+    ? caseDifficulties[Math.floor(Math.random() * caseDifficulties.length)] : settings.caseDifficulty;
   const scenario = JSON.stringify(settings);
   const history = [{ role: 'user', content: `请生成一个病例并开始接诊。病例设定：${scenario}` }];
   const response = parseCase(await complete('case', history, {
-    scenario, session: { defaultSpecies: Math.random() < 0.5 ? '犬' : '猫' }
+    scenario, session: { defaultSpecies: Math.random() < 0.5 ? '犬' : '猫', preferredCaseDifficulty }
   }));
   if (response.clarification) throw new Error(response.clarification);
   if (!allowsCaseSpecies(settings, response.dossier.pet?.species, response.speciesOverride)) {
     throw new Error('模型未返回符合设定的物种。请重试。');
   }
-  const record = createCase(settings, response.dossier, response.opening);
+  const caseDifficulty = random && settings.scopeDetail && caseDifficulties.includes(response.caseDifficulty)
+    ? response.caseDifficulty : preferredCaseDifficulty;
+  const record = createCase({ ...settings, caseDifficulty }, response.dossier, response.opening);
   beginSave(signal);
   enterCase(await store.add(record), 'profile-panel');
 }
 
-async function nextTurn(input, note, signal) {
+async function nextTurn(input, note, signal, stage = 'consultation') {
   const record = current;
-  const history = [...consultationHistory(record), { role: 'user', content: input }];
-  activeRequest.userRow = appendMessage('', 'user', input, '', note).row;
-  scrollMessages('');
+  const surgery = stage === 'surgery';
+  const surface = surgery ? 'surgery-' : '';
+  const fields = surgery ? [surgeryDraft, surgeryNoteDraft] : [draft, noteDraft];
+  const turn = record.turns + (record.surgeryTurns ?? 0) + 1;
+  const history = [...clinicalHistory(record, stage), { role: 'user', content: input }];
+  activeRequest.userRow = appendMessage(surface, 'user', input, '', note).row;
+  scrollMessages(surface);
   const state = {
     phase: record.phase,
     settings: { ...record.settings, persona: record.dossier.persona },
-    turn: record.turns + 1,
+    turn,
     hints: record.hints,
     metaAttempts: record.metaAttempts
   };
-  const result = parseTurn(await complete('consultation', history, {
+  const result = parseTurn(await complete(stage, history, {
     scenario: JSON.stringify(record.settings), dossier: record.dossier, session: state
   }));
   beginSave(signal);
-  current = await store.save(recordTurn(record, input, result, note));
-  if (draft.value.trim() === input) draft.value = '';
-  if (noteDraft.value.trim() === note) noteDraft.value = '';
+  current = await store.save(recordTurn(record, input, result, note, stage));
+  if (fields[0].value.trim() === input) fields[0].value = '';
+  if (fields[1].value.trim() === note) fields[1].value = '';
   renderCase();
 }
 
 async function finishReview(signal) {
   const record = current;
   const notes = reviewNotes(record);
-  const history = [...consultationHistory(record), { role: 'user', content: '请生成本次接诊的复盘报告。' }];
+  const history = [...clinicalHistory(record), { role: 'user', content: '请生成本病例的复盘报告。' }];
   const report = parseReview(await complete('review', history, {
     scenario: JSON.stringify(record.settings), dossier: record.dossier,
-    session: { turn: record.turns, hints: record.hints, metaAttempts: record.metaAttempts, notes }
+    session: {
+      caseDifficulty: record.settings.caseDifficulty,
+      turn: record.turns, surgeryTurns: record.surgeryTurns ?? 0,
+      hints: record.hints, metaAttempts: record.metaAttempts, notes
+    }
   }), notes);
   beginSave(signal);
   current = await store.save(recordReview(record, report));
-  draft.value = '';
-  noteDraft.value = '';
+  for (const field of clinicalDrafts) field.value = '';
   renderCase();
   if (selectedTab === 'review-panel') {
     get('review-panel').scrollTop = 0;
@@ -517,7 +553,7 @@ async function nextDebug(text, instruction, signal) {
   scrollMessages('');
   const recentDebug = record.history.filter(message => message.type === 'debug').slice(-8)
     .map(({ role, content }) => ({ role, content: role === 'user' ? debugCommand(content) ?? content : content }));
-  const result = parseTurn(await complete('debug', [...consultationHistory(record), ...recentDebug, request], {
+  const result = parseTurn(await complete('debug', [...clinicalHistory(record), ...recentDebug, request], {
     scenario: JSON.stringify(record.settings), dossier: record.dossier,
     session: { ...helperContext(record), settings: record.settings, configuration: { preset: config.preset, worldbook: config.worldbook } }
   }));
@@ -635,9 +671,16 @@ get('chat-form').addEventListener('submit', event => {
     runRequest('', '等待家长回复…', signal => nextTurn(text, note, signal));
   }
 });
+get('surgery-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const input = surgeryDraft.value.trim();
+  if (!config || !current || current.phase === 'review' || activeRequest || !input) return;
+  const note = surgeryNoteDraft.value.trim();
+  runRequest('', '正在模拟手术…', signal => nextTurn(input, note, signal, 'surgery'));
+});
 function startReview() {
   if (!config || !current || current.phase === 'review' || activeRequest) return;
-  const unfinished = draft.value.trim() || noteDraft.value.trim();
+  const unfinished = clinicalDrafts.some(field => field.value.trim());
   if (!window.confirm(unfinished ? '还有未发送的消息或备注。确定结束接诊并生成复盘？' : '结束本病例接诊并生成复盘？')) return;
   selectTab('review-panel');
   runRequest('', '正在整理复盘报告…', finishReview);
@@ -654,7 +697,7 @@ get('assistant-form').addEventListener('submit', event => {
 assistantDialog.addEventListener('close', () => {
   if (activeRequest?.surface === 'assistant-' && !activeRequest.committing) activeRequest.controller.abort();
 });
-for (const field of [draft, assistantDraft]) {
+for (const field of [draft, surgeryDraft, assistantDraft]) {
   field.addEventListener('input', renderControls);
   field.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
@@ -709,7 +752,7 @@ await Promise.all([
     libraryError('无法打开本机存储。请确认浏览器允许此网站保存数据后刷新重试。');
   }),
   Promise.all(['preset', 'worldbook', 'api'].map(loadConfig)).then(([preset, worldbook, api]) => {
-    if (!Array.isArray(preset?.messages) || !preset.tasks?.case || !preset.tasks?.help ||
+    if (!Array.isArray(preset?.messages) || !preset.tasks?.case || !preset.tasks?.help || !preset.tasks?.surgery ||
         !Array.isArray(worldbook?.entries) || !api || typeof api !== 'object') {
       throw new Error('配置结构有误，请检查预设、世界书和 API 文件。');
     }

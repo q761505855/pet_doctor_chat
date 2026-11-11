@@ -83,7 +83,7 @@ function readEnvelope(text, label) {
 }
 
 export function parseCase(text) {
-  const { dossier, opening, clarification, options, speciesOverride } = readEnvelope(text, '病例');
+  const { dossier, opening, clarification, options, speciesOverride, caseDifficulty } = readEnvelope(text, '病例');
   if (!dossier && typeof clarification === 'string' && clarification.trim()) {
     return { clarification: clarification.trim() };
   }
@@ -99,7 +99,10 @@ export function parseCase(text) {
     resolved.turnLimit = options.turnLimit;
   }
   if (typeof options?.examLimit === 'string') resolved.examLimit = options.examLimit.slice(0, 150);
-  return { dossier, opening: opening.trim(), options: resolved, speciesOverride: cleanText(speciesOverride) };
+  return {
+    dossier, opening: opening.trim(), options: resolved, speciesOverride: cleanText(speciesOverride),
+    ...(cleanText(caseDifficulty) && { caseDifficulty: cleanText(caseDifficulty) })
+  };
 }
 
 export function allowsCaseSpecies(settings, species, override) {

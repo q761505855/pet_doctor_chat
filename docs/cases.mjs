@@ -1,5 +1,7 @@
 const text = value => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 
+export const caseDifficulties = ['入门', '中等', '高难'];
+
 export function caseProfile(dossier) {
   const pet = dossier.pet ?? {};
   const owners = Array.isArray(dossier.owners) ? dossier.owners.filter(owner => owner && typeof owner === 'object') : [];
@@ -32,17 +34,21 @@ export function createCase(settings, dossier, opening) {
   };
 }
 
-export function recordTurn(current, input, result, note = '') {
-  const turns = current.turns + 1;
-  const phase = ['judgment', 'treatment'].includes(result.phase) ? 'judgment' : current.phase;
+export function recordTurn(current, input, result, note = '', stage = 'consultation') {
+  const surgery = stage === 'surgery';
+  const turn = current.turns + (current.surgeryTurns ?? 0) + 1;
+  const phase = !surgery && ['judgment', 'treatment'].includes(result.phase) ? 'judgment' : current.phase;
+  const context = surgery ? { stage } : {};
   const thought = note.trim();
   return {
-    ...current, phase, turns,
+    ...current, phase,
+    turns: current.turns + Number(!surgery),
+    ...(surgery && { surgeryTurns: (current.surgeryTurns ?? 0) + 1 }),
     metaAttempts: current.metaAttempts + Number(result.metaAttempt === true),
     history: [...current.history,
-      { role: 'user', content: input, turn: turns, ...(thought && { note: thought }) },
-      { role: 'assistant', content: result.reply, turn: turns }],
-    results: [...current.results, ...(result.results ?? []).map(item => ({ ...item, turn: turns }))]
+      { role: 'user', content: input, turn, ...context, ...(thought && { note: thought }) },
+      { role: 'assistant', content: result.reply, turn, ...context }],
+    results: [...current.results, ...(result.results ?? []).map(item => ({ ...item, turn }))]
   };
 }
 
@@ -65,16 +71,30 @@ export function caseMessages(current) {
 const formalMessages = current => caseMessages(current).filter(message => message.type !== 'debug');
 
 export function reviewNotes(current) {
-  return formalMessages(current).flatMap(({ role, content, note, turn }) =>
-    role === 'user' && note ? [{ turn, message: content, note }] : []);
+  return formalMessages(current).flatMap(({ role, content, note, turn, stage }) =>
+    role === 'user' && note ? [{ turn, message: content, note, ...(stage && { stage }) }] : []);
 }
 
-export function consultationHistory(current) {
-  return formalMessages(current).map(({ role, content, turn, type }) => ({
-    role,
-    content: role === 'assistant' && !type && turn ? [content, ...current.results
-      .filter(item => item.turn === turn).map(item => `【检查报告】${JSON.stringify(item)}`)].join('\n\n') : content
-  }));
+export function clinicalHistory(current, targetStage) {
+  return formalMessages(current).flatMap(({ role, content, turn, type, stage }) => {
+    const surgery = stage === 'surgery';
+    const reports = role === 'assistant' && !type && turn ? current.results
+      .filter(item => item.turn === turn).map(item => `【检查报告】${JSON.stringify(item)}`) : [];
+    const message = surgery ? `【手术 · 第 ${turn} 轮】${content}` : content;
+    if (targetStage !== 'consultation') {
+      return [{ role, content: [message, ...reports].join('\n\n') }];
+    }
+    if (surgery) {
+      const source = role === 'user' ? '兽医在手术页的输入' : '手术现场反馈';
+      return [{ role: 'system', content: [
+        `【仅供模拟引擎延续病情，家长未参与这段交流】${source}：${message}`, ...reports
+      ].join('\n\n') }];
+    }
+    return [
+      { role, content },
+      ...reports.map(report => ({ role: 'system', content: `【客观报告，家长所知以实际告知为准】${report}` }))
+    ];
+  });
 }
 
 export function helperContext(current) {
@@ -82,7 +102,10 @@ export function helperContext(current) {
   const review = caseReview(current);
   return {
     profile: current.profile, phase: current.phase, turn: current.turns,
-    consultation: formalMessages(current).map(({ role, content }) => ({ role, content })),
+    consultation: formalMessages(current).filter(message => message.stage !== 'surgery')
+      .map(({ role, content }) => ({ role, content })),
+    ...(current.surgeryTurns && { surgery: formalMessages(current)
+      .filter(message => message.stage === 'surgery').map(({ role, content }) => ({ role, content })) }),
     reports: current.results,
     ...(review && { review: {
       diagnosis: current.dossier.diagnosis, summary: review.legacyText, score: review.score

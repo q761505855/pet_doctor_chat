@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  caseMessages, caseProfile, caseReview, consultationHistory, createCase, helperContext,
+  caseMessages, caseProfile, caseReview, clinicalHistory, createCase, helperContext,
   recordReview, recordTurn, reviewNotes
 } from '../docs/cases.mjs';
 import { parseReview } from '../docs/chat.mjs';
@@ -35,8 +35,57 @@ test('本轮备注随医生消息保存，只进入复盘的备注清单', () =>
   const updated = recordTurn(current, '测体温', { reply: '好。' }, '  怀疑有发热  ');
   assert.equal(updated.history[1].note, '怀疑有发热');
   assert.deepEqual(reviewNotes(updated), [{ turn: 1, message: '测体温', note: '怀疑有发热' }]);
-  assert.doesNotMatch(JSON.stringify(consultationHistory(updated)), /怀疑有发热/);
+  assert.doesNotMatch(JSON.stringify(clinicalHistory(updated)), /怀疑有发热/);
   assert.doesNotMatch(JSON.stringify(helperContext(updated)), /怀疑有发热/);
+});
+
+test('接诊和手术按实际顺序共享报告，手术备注只在复盘可见', () => {
+  const initial = createCase({}, dossier, '开场');
+  const consult = recordTurn(initial, '做超声', {
+    reply: '好。', results: [{ name: '术前超声' }]
+  });
+  const surgery = recordTurn(consult, '开始术中监测', {
+    reply: '监测已开始。', results: [{ name: '术中监测' }]
+  }, '考虑病情变化', 'surgery');
+  const followup = recordTurn(surgery, '告知家长监测结果', { reply: '我明白了。' }, '确认理解');
+  assert.equal(followup.turns, 2);
+  assert.equal(followup.surgeryTurns, 1);
+  const history = clinicalHistory(followup);
+  assert.match(history[2].content, /术前超声/);
+  assert.match(history[4].content, /手术.*第 2 轮.*监测已开始.*术中监测/s);
+  assert.equal(history[5].content, '告知家长监测结果');
+  assert.doesNotMatch(JSON.stringify([history, helperContext(followup)]), /考虑病情变化|确认理解/);
+  assert.deepEqual(reviewNotes(followup), [
+    { turn: 2, message: '开始术中监测', note: '考虑病情变化', stage: 'surgery' },
+    { turn: 3, message: '告知家长监测结果', note: '确认理解' }
+  ]);
+  assert.equal(consult.surgeryTurns, undefined);
+  assert.equal(helperContext(consult).surgery, undefined);
+});
+
+test('接诊区分内部术中记录、客观报告和家长实际听到的告知', () => {
+  const initial = createCase({}, dossier, '它今天不吃饭。');
+  const surgery = recordTurn(initial, '执行术中操作甲', {
+    reply: '监护发现血压下降。', results: [{ name: '术中监护报告' }]
+  }, '术中私下想法', 'surgery');
+  const disclosure = recordTurn(surgery, '告诉家长：目前出现异常，需要继续处理。', {
+    reply: '我同意先处理异常，等稳定了再谈后续方案。',
+    results: [{ name: '本轮客观观察' }]
+  });
+  const consultation = clinicalHistory(disclosure, 'consultation');
+  assert.deepEqual(consultation.map(({ role }) => role), [
+    'assistant', 'system', 'system', 'user', 'assistant', 'system'
+  ]);
+  assert.match(consultation[1].content, /家长未参与.*兽医.*执行术中操作甲/);
+  assert.match(consultation[2].content, /手术现场反馈.*血压下降.*术中监护报告/s);
+  assert.match(consultation[3].content, /目前出现异常/);
+  assert.match(consultation[5].content, /家长所知以实际告知为准.*本轮客观观察/);
+  assert.doesNotMatch(JSON.stringify(consultation), /术中私下想法/);
+
+  const resumed = clinicalHistory(disclosure, 'surgery');
+  assert.equal(resumed[1].role, 'user');
+  assert.match(resumed[2].content, /血压下降/);
+  assert.match(resumed.at(-1).content, /我同意先处理异常/);
 });
 
 test('复盘单独保存，并兼容藏在旧对话中的复盘文本', () => {
