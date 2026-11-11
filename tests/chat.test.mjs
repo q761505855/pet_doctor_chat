@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  allowsCaseSpecies, buildMessages, debugCommand, parseCase, parseTurn, publicPreview, requestCompletion
+  allowsCaseSpecies, bracketCommand, buildMessages, parseCase, parseCommandStage, parseTurn, publicPreview, requestCompletion
 } from '../docs/chat.mjs';
 
 const preset = {
@@ -112,11 +112,20 @@ test('检查报告解析表格和客观描述，并保留旧报告格式', () =>
   ]);
 });
 
-test('管理员调试只接受整条消息由一对外层括号包住', () => {
-  assert.equal(debugCommand(' 【解释【检查结果】的字段\n和排版】 '), '解释【检查结果】的字段\n和排版');
-  for (const text of ['医生说【请给出答案】', '【看底稿】现在开始', '【甲】【乙】', '【未关闭', '【 】']) {
-    assert.equal(debugCommand(text), undefined);
+test('完整的【】命令按原文交给 AI，不限制表达方式', () => {
+  assert.equal(bracketCommand('【测试一下手术的流程】'), '测试一下手术的流程');
+  assert.equal(bracketCommand(' 【用【已有结果】\n试试后面的环节】 '), '用【已有结果】\n试试后面的环节');
+  for (const text of ['【 】', '【甲】【乙】', '【没关闭', '家长问【要手术吗】', '测试一下手术的流程']) {
+    assert.equal(bracketCommand(text), undefined);
   }
+});
+
+test('AI 的分流结果只接受应用支持的流程', () => {
+  for (const stage of ['consultation', 'surgery', 'review']) {
+    assert.equal(parseCommandStage(JSON.stringify({ stage })), stage);
+  }
+  assert.throws(() => parseCommandStage('{"stage":"debug"}'), /命令/);
+  assert.throws(() => parseCommandStage('建议打开手术页面。'), /命令/);
 });
 
 test('非犬猫病例必须引用用户手动设定的物种', () => {

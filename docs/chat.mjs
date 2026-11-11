@@ -1,6 +1,6 @@
 const roles = ['system', 'assistant', 'user'];
 
-export function debugCommand(input) {
+export function bracketCommand(input) {
   const text = input.trim();
   if (!text.startsWith('【') || !text.endsWith('】')) return;
   let depth = 0;
@@ -8,7 +8,7 @@ export function debugCommand(input) {
     if (text[index] === '【') depth++;
     if (text[index] === '】') {
       depth--;
-      if (depth === 0 && index !== text.length - 1) return;
+      if (depth === 0 && index < text.length - 1) return;
     }
   }
   if (depth === 0) return text.slice(1, -1).trim() || undefined;
@@ -80,6 +80,12 @@ function readEnvelope(text, label) {
     // Avoid displaying raw model output. It may contain the concealed case.
   }
   throw new Error(`AI 返回的${label}格式无效，请重试。`);
+}
+
+export function parseCommandStage(text) {
+  const { stage } = readEnvelope(text, '命令分流');
+  if (['consultation', 'surgery', 'review'].includes(stage)) return stage;
+  throw new Error('AI 未返回可执行的命令流程，请重试。');
 }
 
 export function parseCase(text) {

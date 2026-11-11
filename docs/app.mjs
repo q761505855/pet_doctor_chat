@@ -1,5 +1,5 @@
 import {
-  allowsCaseSpecies, buildMessages, debugCommand, parseCase, parseReview, parseTurn, publicPreview, requestCompletion
+  allowsCaseSpecies, bracketCommand, buildMessages, parseCase, parseCommandStage, parseReview, parseTurn, publicPreview, requestCompletion
 } from './chat.mjs';
 import {
   caseDifficulties, caseMessages, caseReview, clinicalHistory, createCase, helperContext, nextTurnNumber,
@@ -22,6 +22,7 @@ const messageEditorDraft = get('message-editor-draft');
 const tabs = [...document.querySelectorAll('[data-tab]')];
 const reviewButtons = [...document.querySelectorAll('[data-review]')];
 const phaseLabels = { consultation: '接诊中', judgment: '诊断判断', review: '已复盘' };
+const clinicalLoading = { consultation: '等待家长回复…', surgery: '正在模拟手术…', review: '正在整理复盘报告…' };
 const resultTypes = { physical: '体格检查', test: '辅助检查' };
 const reportFlags = { normal: '正常', high: '↑ 偏高', low: '↓ 偏低', abnormal: '异常' };
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' });
@@ -429,16 +430,14 @@ function retryMessage(surface, message) {
     return;
   }
   if (!current || current.phase === 'review' || !current.history.includes(message)) return;
-  const record = rewindCase(current, message);
+  const command = bracketCommand(message.content);
+  const retry = !command && message.type !== 'debug';
+  const record = rewindCase(current, message, { includeMessage: retry });
   const hasLater = caseMessages(current).at(-1) !== message || record.results.length < current.results.length;
   if (hasLater && !window.confirm('重试成功后，这条消息之后的接诊和手术对话及相关检查将被删除。继续重试？')) return;
-  if (message.type === 'debug') {
-    runRequest('', '正在重试…', signal =>
-      nextDebug(message.content, debugCommand(message.content) ?? message.content, signal, record));
-    return;
-  }
-  const stage = message.stage === 'surgery' ? 'surgery' : 'consultation';
-  runRequest('', '正在重试…', signal => nextTurn(message.content, message.note ?? '', signal, stage, record));
+  const sourceStage = message.stage ?? 'consultation';
+  runRequest('', command ? '正在理解命令…' : '正在重试…', signal =>
+    runClinicalInput(message.content, message.note ?? '', signal, { sourceStage, command, record, retry }));
 }
 
 function scrollMessages(surface) {
@@ -516,7 +515,7 @@ function renderControls() {
 
 function complete(stage, history, options = {}) {
   const { preset, worldbook, api } = config;
-  const isolated = stage === 'helper' || stage === 'help';
+  const isolated = ['helper', 'help', 'command'].includes(stage);
   const request = activeRequest;
   const messages = buildMessages({
     preset: isolated ? { ...preset, messages: preset.messages.filter(item => item.stages?.includes(stage)) } : preset,
@@ -524,7 +523,7 @@ function complete(stage, history, options = {}) {
   });
   return requestCompletion(api, messages, fetch, {
     signal: request.controller.signal,
-    onText: text => showPartial(request, stage, text)
+    onText: stage === 'command' ? undefined : text => showPartial(request, stage, text)
   });
 }
 
@@ -598,12 +597,9 @@ async function startCase(settings, signal) {
   enterCase(await store.add(record), 'profile-panel');
 }
 
-async function nextTurn(input, note, signal, stage = 'consultation', retryRecord) {
-  const record = retryRecord ?? current;
-  const retry = Boolean(retryRecord);
+async function nextTurn(input, note, signal, stage, record, retry) {
   const surgery = stage === 'surgery';
   const surface = surgery ? 'surgery-' : '';
-  const fields = surgery ? [surgeryDraft, surgeryNoteDraft] : [draft, noteDraft];
   const turn = retry ? record.history.at(-1).turn : nextTurnNumber(record);
   const context = retry ? { ...record, history: record.history.slice(0, -1) } : record;
   const history = [...clinicalHistory(context, stage), { role: 'user', content: input }];
@@ -622,15 +618,48 @@ async function nextTurn(input, note, signal, stage = 'consultation', retryRecord
   }));
   beginSave(signal);
   current = await store.save(recordTurn(record, input, result, note, stage, retry));
-  if (!retry && fields[0].value.trim() === input) fields[0].value = '';
-  if (!retry && fields[1].value.trim() === note) fields[1].value = '';
   renderCase();
 }
 
-async function finishReview(signal) {
-  const record = current;
+async function runClinicalInput(input, note, signal, { sourceStage, command, record = current, retry = false }) {
+  let stage = sourceStage;
+  if (command) {
+    const history = [...clinicalHistory(record).slice(-6), { role: 'user', content: command }];
+    stage = parseCommandStage(await complete('command', history, { session: { sourceStage } }));
+    if (signal.aborted) throw signal.reason;
+    get('request-label').textContent = clinicalLoading[stage];
+  }
+  if (stage === 'review') {
+    if (!window.confirm('结束本病例接诊并生成复盘？')) return false;
+    selectTab('review-panel');
+    await finishReview(signal, record, input);
+    return true;
+  }
+  if (!retry && stage === 'consultation' && record.settings.turnLimit && record.turns >= record.settings.turnLimit) {
+    feedback('', '已达到轮次上限。可以结束接诊并复盘。');
+    return false;
+  }
+  if (stage === 'surgery' || stage !== sourceStage) selectTab(stage === 'surgery' ? 'surgery-panel' : 'transcript');
+  await nextTurn(input, note, signal, stage, record, retry);
+  return true;
+}
+
+function submitClinicalTurn(field, noteField, sourceStage) {
+  if (!config || !current || current.phase === 'review' || activeRequest) return;
+  const input = field.value.trim();
+  if (!input) return;
+  const command = bracketCommand(input);
+  const note = noteField.value.trim();
+  runRequest('', command ? '正在理解命令…' : clinicalLoading[sourceStage], async signal => {
+    if (!await runClinicalInput(input, note, signal, { sourceStage, command })) return;
+    if (field.value.trim() === input) field.value = '';
+    if (noteField.value.trim() === note) noteField.value = '';
+  });
+}
+
+async function finishReview(signal, record = current, input = '请生成本病例的复盘报告。') {
   const notes = reviewNotes(record);
-  const history = [...clinicalHistory(record), { role: 'user', content: '请生成本病例的复盘报告。' }];
+  const history = [...clinicalHistory(record), { role: 'user', content: input }];
   const report = parseReview(await complete('review', history, {
     scenario: JSON.stringify(record.settings), dossier: record.dossier,
     session: {
@@ -647,29 +676,6 @@ async function finishReview(signal) {
     get('review-panel').scrollTop = 0;
     get('review-title').focus({ preventScroll: true });
   }
-}
-
-async function nextDebug(text, instruction, signal, retryRecord) {
-  const record = retryRecord ?? current;
-  const retry = Boolean(retryRecord);
-  const request = { role: 'user', content: instruction };
-  if (!retry) activeRequest.userRow = appendMessage('', 'user', text, 'debug').row;
-  scrollMessages('');
-  const previous = retry ? record.history.slice(0, -1) : record.history;
-  const recentDebug = previous.filter(message => message.type === 'debug').slice(-8)
-    .map(({ role, content }) => ({ role, content: role === 'user' ? debugCommand(content) ?? content : content }));
-  const result = parseTurn(await complete('debug', [...clinicalHistory(record), ...recentDebug, request], {
-    scenario: JSON.stringify(record.settings), dossier: record.dossier,
-    session: { ...helperContext(record), settings: record.settings, configuration: { preset: config.preset, worldbook: config.worldbook } }
-  }));
-  beginSave(signal);
-  current = await store.save({
-    ...record, history: [...record.history,
-      ...(!retry ? [{ role: 'user', content: text, type: 'debug' }] : []),
-      { role: 'assistant', content: result.reply, type: 'debug' }]
-  });
-  if (!retry && draft.value.trim() === text) draft.value = '';
-  renderCase();
 }
 
 function renderAssistant() {
@@ -772,27 +778,11 @@ form.addEventListener('submit', event => {
 });
 get('chat-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (!config || !current || current.phase === 'review' || activeRequest) return;
-  const text = draft.value.trim();
-  if (!text) return;
-  const instruction = debugCommand(text);
-  if (instruction) {
-    runRequest('', '正在处理…', signal => nextDebug(text, instruction, signal));
-    return;
-  }
-  if (current.settings.turnLimit && current.turns >= current.settings.turnLimit) {
-    feedback('', '已达到轮次上限。可以结束接诊并复盘。');
-    return;
-  }
-  const note = noteDraft.value.trim();
-  runRequest('', '等待家长回复…', signal => nextTurn(text, note, signal));
+  submitClinicalTurn(draft, noteDraft, 'consultation');
 });
 get('surgery-form').addEventListener('submit', event => {
   event.preventDefault();
-  const input = surgeryDraft.value.trim();
-  if (!config || !current || current.phase === 'review' || activeRequest || !input) return;
-  const note = surgeryNoteDraft.value.trim();
-  runRequest('', '正在模拟手术…', signal => nextTurn(input, note, signal, 'surgery'));
+  submitClinicalTurn(surgeryDraft, surgeryNoteDraft, 'surgery');
 });
 function startReview() {
   if (!config || !current || current.phase === 'review' || activeRequest) return;
@@ -892,6 +882,7 @@ await Promise.all([
   }),
   Promise.all(['preset', 'worldbook', 'api'].map(loadConfig)).then(([preset, worldbook, api]) => {
     if (!Array.isArray(preset?.messages) || !preset.tasks?.case || !preset.tasks?.help || !preset.tasks?.surgery ||
+        !preset.tasks?.command ||
         !Array.isArray(worldbook?.entries) || !api || typeof api !== 'object') {
       throw new Error('配置结构有误，请检查预设、世界书和 API 文件。');
     }

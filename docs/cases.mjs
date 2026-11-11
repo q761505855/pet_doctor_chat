@@ -75,15 +75,16 @@ export function caseMessages(current) {
     !(message.role === 'user' && message.content === '结束本次接诊，开始复盘。' && history[index + 1]?.type === 'review'));
 }
 
-export function rewindCase(current, message) {
+export function rewindCase(current, message, { includeMessage = true } = {}) {
   if (current.phase === 'review') throw new Error('已复盘的病例对话只能查看。');
   const index = current.history.indexOf(message);
-  const history = current.history.slice(0, index + 1);
+  const end = index + Number(includeMessage);
+  const history = current.history.slice(0, end);
   const retained = new Map(history.filter(entry => entry.turn).map(entry => [entry.turn, entry.stage]));
   const surgeryTurns = [...retained.values()].filter(stage => stage === 'surgery').length;
   const lastTurn = Math.max(0, ...retained.keys());
   const results = current.results.filter(report => message.turn ? report.turn < message.turn : report.turn <= lastTurn);
-  const removedAttempts = current.history.slice(index + 1).filter(entry => entry.metaAttempt).length;
+  const removedAttempts = current.history.slice(end).filter(entry => entry.metaAttempt).length;
   return {
     ...current, history, results, turns: retained.size - surgeryTurns, surgeryTurns,
     metaAttempts: Math.max(0, current.metaAttempts - removedAttempts),
