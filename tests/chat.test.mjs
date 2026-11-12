@@ -221,6 +221,24 @@ test('非犬猫病例必须引用用户手动设定的物种', () => {
   assert.equal(allowsCaseSpecies({ freeform: '想练兔子病例' }, '家兔', ''), false);
 });
 
+test('用相同设定生成病例时，每次请求的首条消息都有独立编号', () => {
+  const history = [{ role: 'user', content: '请生成一个病例。病例范围：猫 + 急诊' }];
+  const input = { preset, worldbook: {}, history };
+  const first = buildMessages({ ...input, stage: 'case' });
+  const second = buildMessages({ ...input, stage: 'case' });
+  const [firstLine, ...firstPrompt] = first[0].content.split('\n');
+  const [secondLine, ...secondPrompt] = second[0].content.split('\n');
+  assert.match(firstLine, /^【病例生成编号】[\d-]+$/);
+  assert.match(secondLine, /^【病例生成编号】[\d-]+$/);
+  assert.notEqual(firstLine, secondLine);
+  assert.deepEqual(firstPrompt, secondPrompt);
+  assert.deepEqual(first.slice(1), history);
+  assert.deepEqual(second.slice(1), history);
+
+  const review = buildMessages({ ...input, stage: 'review' });
+  assert.equal(review[0].content, '预设系统\n\n开始复盘');
+});
+
 test('生成病例时通过本次设定匹配世界书，复盘条目保持阶段隔离', () => {
   const worldbook = {
     entries: [

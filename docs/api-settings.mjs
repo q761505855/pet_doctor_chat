@@ -1,4 +1,5 @@
-import { requestCompletion, requestModels } from './chat.mjs?v=stream-timeout';
+import { requestCompletion, requestModels } from './chat.mjs?v=case-generation';
+import { defaultApi } from './config/api.mjs';
 
 const storageKey = 'pet-doctor-chat:api-settings';
 
@@ -6,8 +7,8 @@ function readSavedSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
     if ([saved?.baseUrl, saved?.apiKey, saved?.model].every(value => typeof value === 'string' && value.trim())) {
-      const { baseUrl, apiKey, model } = saved;
-      return { baseUrl, apiKey, model };
+      const { baseUrl, apiKey, model, mode } = saved;
+      return { baseUrl, apiKey, model, mode };
     }
   } catch {
     // The settings form remains available if storage is blocked or the saved value is invalid.
@@ -16,15 +17,19 @@ function readSavedSettings() {
 
 export function bindApiSettings(dialog, notice) {
   const form = dialog.querySelector('#api-settings-form');
-  const { baseUrl, apiKey, model } = form.elements;
+  const { mode, baseUrl, apiKey, model } = form.elements;
+  const defaultInfo = dialog.querySelector('#default-api-info');
+  const customFields = dialog.querySelector('#custom-api-fields');
   const fetchButton = dialog.querySelector('#fetch-models');
   const testButton = dialog.querySelector('#test-api-connection');
   const saveButton = dialog.querySelector('#save-api-settings');
   const clearButton = dialog.querySelector('#clear-api-settings');
   const status = dialog.querySelector('#api-settings-feedback');
   let saved = readSavedSettings();
+  let activeMode = saved && saved.mode !== 'default' ? 'custom' : 'default';
   let pending;
-  notice.hidden = Boolean(saved);
+  dialog.querySelector('#default-api-model').textContent = defaultApi.model;
+  notice.hidden = activeMode === 'custom';
 
   function feedback(message = '', error = false) {
     status.textContent = message;
@@ -37,10 +42,14 @@ export function bindApiSettings(dialog, notice) {
   }
 
   function updateControls() {
+    const custom = mode.value === 'custom';
+    defaultInfo.hidden = custom;
+    customFields.hidden = customFields.disabled = !custom;
     fetchButton.disabled = Boolean(pending);
     model.disabled = Boolean(pending) || model.options.length === 1;
-    testButton.disabled = saveButton.disabled = model.disabled || !model.value;
-    clearButton.hidden = !saved;
+    testButton.disabled = model.disabled || !model.value;
+    saveButton.disabled = custom && testButton.disabled;
+    clearButton.hidden = !custom || !saved;
   }
 
   function showModels(models, selected = '') {
@@ -56,6 +65,7 @@ export function bindApiSettings(dialog, notice) {
 
   function show() {
     cancelRequest();
+    mode.value = activeMode;
     baseUrl.value = saved?.baseUrl ?? '';
     apiKey.value = saved?.apiKey ?? '';
     apiKey.setCustomValidity('');
@@ -63,6 +73,12 @@ export function bindApiSettings(dialog, notice) {
     feedback();
     dialog.showModal();
   }
+
+  mode.addEventListener('change', () => {
+    cancelRequest();
+    updateControls();
+    feedback();
+  });
 
   for (const field of [baseUrl, apiKey]) {
     field.addEventListener('input', () => {
@@ -120,15 +136,16 @@ export function bindApiSettings(dialog, notice) {
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (saveButton.disabled) return;
-    const settings = { ...connection(), model: model.value };
+    const settings = mode.value === 'custom' ? { ...connection(), model: model.value } : saved;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(settings));
+      localStorage.setItem(storageKey, JSON.stringify({ ...settings, mode: mode.value }));
     } catch {
       feedback('无法保存 AI 设置，请检查浏览器是否允许此网站保存数据。', true);
       return;
     }
     saved = settings;
-    notice.hidden = true;
+    activeMode = mode.value;
+    notice.hidden = activeMode === 'custom';
     dialog.close();
   });
 
@@ -140,6 +157,7 @@ export function bindApiSettings(dialog, notice) {
       return;
     }
     saved = undefined;
+    activeMode = 'default';
     notice.hidden = false;
     dialog.close();
   });
@@ -150,5 +168,5 @@ export function bindApiSettings(dialog, notice) {
     apiKey.value = '';
   });
 
-  return { show, get current() { return saved; } };
+  return { show, get current() { return activeMode === 'custom' ? saved : defaultApi; } };
 }

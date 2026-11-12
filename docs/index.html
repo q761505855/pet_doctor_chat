@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f5f7f3">
   <meta name="description" content="以病例为中心的宠物临床模拟训练。">
   <title>宠物问诊室</title>
-  <link rel="stylesheet" href="./style.css?v=connection-test">
-  <script type="module" src="./app.mjs?v=stream-timeout"></script>
+  <link rel="stylesheet" href="./style.css?v=shared-ai">
+  <script type="module" src="./app.mjs?v=case-difficulty"></script>
 </head>
 <body>
   <main id="shell">
@@ -29,7 +29,7 @@
             <button class="primary" id="new-case" type="button"><span aria-hidden="true">＋</span> 新建病例</button>
           </div>
         </section>
-        <p id="api-setup-notice" class="feedback" hidden>使用 AI 功能前，请在「AI 设置」中连接模型。</p>
+        <p id="shared-ai-notice" class="feedback" hidden>默认 AI 使用共享额度。想获得完整体验，可在「AI 设置」中选择「自定义」并配置自己的 API。</p>
         <div class="list-heading">
           <h2>我的病例</h2>
           <span class="local-label">本机保存</span>
@@ -202,6 +202,14 @@
       <form id="api-settings-form" class="create-form">
         <div class="scroll api-settings-content">
           <div class="form-card">
+            <label for="api-mode">AI 配置</label>
+            <select id="api-mode" name="mode">
+              <option value="default">使用默认 AI</option>
+              <option value="custom">自定义</option>
+            </select>
+            <p id="default-api-info" class="api-settings-hint">默认 AI 使用共享额度，固定使用 <strong id="default-api-model"></strong>。想获得完整体验，建议选择「自定义」并配置自己的 API。</p>
+          </div>
+          <fieldset id="custom-api-fields" class="form-card" aria-label="自定义 API" hidden disabled>
             <label for="api-url">API 地址</label>
             <input id="api-url" name="baseUrl" type="url" placeholder="https://example.com/v1" required spellcheck="false">
             <label for="api-token">Token</label>
@@ -212,13 +220,13 @@
               <option value="">请选择模型</option>
             </select>
             <button class="soft" id="test-api-connection" type="button" disabled>测试连接</button>
-            <p class="api-settings-hint">设置保存在当前浏览器。共用设备上可在用完后清除设置。</p>
-          </div>
+            <p class="api-settings-hint">自定义配置保存在当前浏览器。共用设备上可在用完后清除自定义配置。</p>
+          </fieldset>
         </div>
         <footer class="action-bar">
           <p id="api-settings-feedback" class="feedback" role="status" hidden></p>
           <div class="api-settings-actions">
-            <button class="soft" id="clear-api-settings" type="button" hidden>清除设置</button>
+            <button class="soft" id="clear-api-settings" type="button" hidden>清除自定义配置</button>
             <button class="primary" id="save-api-settings" type="submit" disabled>保存设置</button>
           </div>
         </footer>
@@ -235,20 +243,22 @@
       <div class="scroll guide-content" id="system-guide" tabindex="0" aria-label="使用指南">
         <p>你扮演兽医，AI 扮演宠物家长，并模拟检查结果和手术现场。一次练习可以覆盖问诊、诊断、治疗沟通和复盘。</p>
         <section class="guide-section">
-          <h3>连接 AI 模型</h3>
-          <p>在「病例管理」点「AI 设置」，填入 OpenAI 兼容服务的 API 地址和 Bearer Token。</p>
-          <p>点「获取模型列表」，在「模型」中选一个，再点「保存设置」。生成病例、接诊、手术、复盘和需要 AI 回答的助手请求都会使用该模型。</p>
+          <h3>选择 AI 配置</h3>
+          <p>首次打开可直接使用默认 AI，固定使用 gemini-3.8-flash-high，所有使用默认 AI 的用户共享额度。之前已保存的自定义配置会继续使用。</p>
+          <p>想获得完整体验，可在「病例管理」打开「AI 设置」，选择「自定义」，填写 OpenAI 兼容服务的 API 地址和 Bearer Token。点「获取模型列表」，选好模型后点「保存设置」。</p>
+          <p>生成病例、接诊、手术、复盘和需要 AI 回答的助手请求都会使用当前配置的模型。</p>
           <p>选好模型后，可以在保存前点「测试连接」。网页会向选中的模型发一句问候，并显示回复或错误。</p>
           <p>获取模型列表和测试连接的超时分别为 15 秒和 30 秒。其他 AI 请求的默认超时为 180 秒。流式回复一收到第一段正文就停止计时，生成时仍可点「停止」。</p>
-          <p>设置保存在当前浏览器。要换模型或 Token，可重新打开「AI 设置」。点「清除设置」可移除连接信息，已保存的病例仍可查看。</p>
+          <p>在「AI 设置」选择「使用默认 AI」并保存，可切回默认 AI。切换时会保留当前浏览器已保存的自定义配置。选择「自定义」后点「清除自定义配置」，可删除连接信息并恢复使用默认 AI。</p>
         </section>
         <section class="guide-section">
           <h3>新建病例</h3>
-          <p>连接模型后，在「病例管理」点「新建病例」。病例范围可留空，也可以写「猫、呕吐」或指定想练的病种和场景。</p>
+          <p>在「病例管理」点「新建病例」。病例范围可留空，也可以写「猫、呕吐」或指定想练的病种和场景。</p>
           <ul>
-            <li><strong>病例难度</strong>决定临床复杂度。入门练常见门诊，中等可能需要进一步检查或判断是否手术，高难涉及老年、神经内科等复杂情况。选随机可在三个档位中抽取。</li>
-            <li><strong>家长难度</strong>决定沟通挑战。可选配合型、普通型、高难度型或难缠家长，也可选「随机」从四档中抽取。手动选择「难缠家长」时还可以指定人设。</li>
+            <li><strong>病例难度</strong>决定临床复杂度。入门练常见门诊，中等可能需要进一步检查或判断是否手术，高难涉及老年、神经内科等复杂情况。</li>
+            <li><strong>家长难度</strong>决定沟通挑战。可选配合型、普通型、高难度型或难缠家长。手动选择「难缠家长」时还可以指定人设。</li>
           </ul>
+          <p>两种难度都可选「随机」。每次点「生成病例」时，网页会先为选了「随机」的项目分别抽取具体档位，再请 AI 按抽中的难度生成。如果病例范围和难度冲突，可按提示调整后重新生成。</p>
           <h4 class="guide-subheading">更多训练选项</h4>
           <p>三个选项可以同时使用。治疗沟通默认开启，其余两项可按需勾选。</p>
           <ul>

@@ -16,14 +16,16 @@
 
 ## 配置 API
 
-在「病例管理」打开「AI 设置」，填入 API 地址和 Bearer Token，点「获取模型列表」，选中模型后点「保存设置」。API 地址可填写带版本路径的基址（如 `https://example.com/v1`）或完整的 `/chat/completions` 地址。
+首次打开可直接使用默认 AI。默认 AI 固定使用 `gemini-3.8-flash-high`，额度由使用默认 AI 的用户共享。浏览器里已有自定义配置时，会继续使用原配置。
+
+想获得完整体验，可在「病例管理」打开「AI 设置」，选择「自定义」，填入 API 地址和 Bearer Token，点「获取模型列表」，选中模型后点「保存设置」。API 地址可填写带版本路径的基址（如 `https://example.com/v1`）或完整的 `/chat/completions` 地址。
 
 选中模型后，可在保存前点「测试连接」，发送一句问候并查看模型回复或错误。
 
 - API 需要兼容 `GET /models` 和 `POST /chat/completions`，允许网页来源跨域调用这两个接口，并在预检响应中允许 `Authorization` 和 `Content-Type`。通过 HTTPS 发布网页时，请使用 HTTPS 的 API 地址。
 - 生成病例、接诊、手术、复盘和助手的 AI 请求使用已选模型。模型需要能根据预设返回 JSON。网页可读取流式回复，也能处理 JSON 响应。
 - 普通 AI 请求默认超时为 180 秒。流式回复收到第一段正文后停止计时，可在生成时点「停止」。获取模型列表和测试连接的超时分别为 15 秒和 30 秒。
-- URL、Token 和模型保存在当前浏览器的站点存储中。换浏览器或站点后需重新配置，可在「AI 设置」点「清除设置」。接诊和助手所需上下文会发送给配置的模型服务。
+- 自定义 API 地址、Token 和模型保存在当前浏览器。选择「使用默认 AI」并保存，可切回默认并保留自定义配置。在「自定义」下点「清除自定义配置」，可删除本机连接信息并恢复使用默认 AI。接诊和助手所需上下文会发送给当前配置的模型服务。
 
 ## 扩展预设和世界书
 
@@ -76,3 +78,5 @@ python -c "import functools,http.server; http.server.SimpleHTTPRequestHandler.ex
 ```
 
 将项目推送到 GitHub 后，在 **Settings → Pages → Build and deployment** 选择 **Deploy from a branch**，来源设为 **main /docs**，然后保存。网页、预设和世界书都通过相对路径加载，无需构建。 [GitHub Pages 发布说明](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+
+默认 AI 的地址、共享 Token 和固定模型在 [docs/config/api.mjs](docs/config/api.mjs) 中，随网页静态发布，浏览器直接加载这份配置。

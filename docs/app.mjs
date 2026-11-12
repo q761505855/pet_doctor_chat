@@ -1,12 +1,12 @@
 import {
   allowsCaseSpecies, bracketCommand, buildMessages, parseCase, parseCommandStage, parseReview, parseTurn, publicPreview, requestCompletion
-} from './chat.mjs?v=stream-timeout';
+} from './chat.mjs?v=case-generation';
 import {
   caseDifficulties, caseMessages, caseReview, clinicalHistory, createCase, helperContext, nextTurnNumber,
   recordReview, recordTurn, reviewNotes, rewindCase
 } from './cases.mjs';
 import { openCaseStore } from './case-store.mjs';
-import { bindApiSettings } from './api-settings.mjs?v=stream-timeout';
+import { bindApiSettings } from './api-settings.mjs?v=case-generation';
 
 const get = id => document.getElementById(id);
 const form = get('settings');
@@ -19,7 +19,7 @@ const assistantDraft = get('assistant-draft');
 const assistantDialog = get('assistant-dialog');
 const systemHelpDialog = get('system-help-dialog');
 const apiSettingsDialog = get('api-settings-dialog');
-const apiSettings = bindApiSettings(apiSettingsDialog, get('api-setup-notice'));
+const apiSettings = bindApiSettings(apiSettingsDialog, get('shared-ai-notice'));
 const messageEditor = get('message-editor');
 const messageEditorDraft = get('message-editor-draft');
 const tabs = [...document.querySelectorAll('[data-tab]')];
@@ -30,13 +30,12 @@ const resultTypes = { physical: '体格检查', test: '辅助检查' };
 const reportFlags = { normal: '正常', high: '↑ 偏高', low: '↓ 偏低', abnormal: '异常' };
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' });
 const systemTopics = [
-  ['怎么设置 AI 模型？', '在「病例管理」点「AI 设置」，填入 API 地址和 Bearer Token，再点「获取模型列表」。选好模型后，可以点「测试连接」发一句问候，查看模型回复。点「保存设置」后，设置会保存在当前浏览器，可在同一处清除。'],
-  ['如何开始接诊？', '先在「病例管理」点「新建病例」。如果还没想好练什么，病例范围可以留空，两个难度也都能选「随机」。点「生成病例」，看过宠物和家长的档案，再点「开始接诊」。你来当兽医，AI 扮演宠物家长。'],
+  ['怎么设置 AI 模型？', '打开「病例管理」里的「AI 设置」。默认 AI 固定使用 gemini-3.8-flash-high，所有使用默认 AI 的用户共享额度。想获得完整体验，可选择「自定义」，填入 API 地址和 Bearer Token，点「获取模型列表」，选好模型后点「保存设置」。保存前可点「测试连接」。切回默认 AI 时会保留已保存的自定义配置。'],
+  ['如何开始接诊？', '先在「病例管理」点「新建病例」。病例范围可以留空，病例难度和家长难度也都能选「随机」。点「生成病例」后，网页会先为选了「随机」的项目抽取具体档位，再请 AI 生成。看过档案后点「开始接诊」。你来当兽医，AI 扮演宠物家长。'],
   ['如何重试同一个病例？', '想把同一个病例再练一遍，可以打开「档案」，点「删除病例」下方的「重试」。你会用同一份病例资料，从家长的第一句话重新开始。之前那一轮还可以在病例列表里找到。'],
   ['检查和复盘在哪看？', '做完检查后，点同一个病例里的「检查」就能看报告。练完后点「结束接诊并复盘」，再去「复盘」看反馈。你每轮写下的备注也会在那里得到评价。'],
   ['病例保存在哪里？', '病例和练习记录都存在你现在用的浏览器里。想接着练，回到「病例管理」，点开原来的病例就行。清除这个网站的浏览器数据也会清掉本机病例。']
 ];
-const apiSetupHint = '请返回「病例管理」，在「AI 设置」中连接模型。';
 let store;
 let config;
 let configError;
@@ -460,6 +459,7 @@ function refreshPersona() {
 
 function readSettings() {
   const data = new FormData(form);
+  const selectedCaseDifficulty = data.get('caseDifficulty');
   const selectedDifficulty = data.get('difficulty');
   let difficulty = selectedDifficulty;
   if (selectedDifficulty === '随机') {
@@ -469,7 +469,8 @@ function readSettings() {
   }
   return {
     scopeDetail: data.get('scopeDetail').trim(),
-    caseDifficulty: data.get('caseDifficulty'),
+    caseDifficulty: selectedCaseDifficulty === '随机'
+      ? caseDifficulties[Math.floor(Math.random() * caseDifficulties.length)] : selectedCaseDifficulty,
     difficulty,
     persona: selectedDifficulty === '难缠家长' ? data.get('persona') : '',
     emergency: data.has('emergency'),
@@ -520,7 +521,6 @@ function renderControls() {
 
 function complete(stage, history, options = {}) {
   const api = apiSettings.current;
-  if (!api) throw new Error(apiSetupHint);
   const { preset, worldbook } = config;
   const isolated = ['helper', 'help', 'command'].includes(stage);
   const request = activeRequest;
@@ -585,21 +585,16 @@ function beginSave(signal, label = '正在保存到本机…') {
 }
 
 async function startCase(settings, signal) {
-  const random = settings.caseDifficulty === '随机';
-  const preferredCaseDifficulty = random
-    ? caseDifficulties[Math.floor(Math.random() * caseDifficulties.length)] : settings.caseDifficulty;
   const scenario = JSON.stringify(settings);
   const history = [{ role: 'user', content: `请生成一个病例并开始接诊。病例设定：${scenario}` }];
   const response = parseCase(await complete('case', history, {
-    scenario, session: { defaultSpecies: Math.random() < 0.5 ? '犬' : '猫', preferredCaseDifficulty }
+    scenario, session: { defaultSpecies: Math.random() < 0.5 ? '犬' : '猫' }
   }));
   if (response.clarification) throw new Error(response.clarification);
   if (!allowsCaseSpecies(settings, response.dossier.pet?.species, response.speciesOverride)) {
     throw new Error('模型未返回符合设定的物种。请重试。');
   }
-  const caseDifficulty = random && settings.scopeDetail && caseDifficulties.includes(response.caseDifficulty)
-    ? response.caseDifficulty : preferredCaseDifficulty;
-  const record = createCase({ ...settings, caseDifficulty }, response.dossier, response.opening);
+  const record = createCase(settings, response.dossier, response.opening);
   beginSave(signal);
   enterCase(await store.add(record), 'profile-panel');
 }
@@ -756,10 +751,6 @@ function askAssistant(text, answer, retryIndex = -1) {
 }
 
 get('new-case').addEventListener('click', () => {
-  if (!apiSettings.current) {
-    apiSettings.show();
-    return;
-  }
   form.reset();
   form.querySelector('details').open = false;
   refreshPersona();
@@ -798,10 +789,6 @@ get('surgery-form').addEventListener('submit', event => {
 });
 function startReview() {
   if (!config || !current || current.phase === 'review' || activeRequest) return;
-  if (!apiSettings.current) {
-    feedback('', apiSetupHint, true);
-    return;
-  }
   const unfinished = clinicalDrafts.some(field => field.value.trim());
   if (!window.confirm(unfinished ? '还有未发送的消息或备注。确定结束接诊并生成复盘？' : '结束本病例接诊并生成复盘？')) return;
   selectTab('review-panel');

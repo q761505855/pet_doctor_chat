@@ -41,7 +41,9 @@ export function buildMessages({ preset, worldbook, history, stage, scenario, dos
   const predefined = preset.messages
     .filter(item => applies(item, stage) && roles.includes(item.role) && item.content?.trim());
   const entries = selectEntries(worldbook, history, stage, scenario);
+  const generationId = stage === 'case' && crypto.getRandomValues(new Uint32Array(4)).join('-');
   const systemParts = [
+    generationId && `【病例生成编号】${generationId}\n此编号仅用于区分请求。请根据本次设定独立构造病例。`,
     ...predefined.filter(item => item.role === 'system').map(item => item.content),
     ...entries.filter(item => (item.position ?? 'system') === 'system').map(item => item.content),
     dossier && `【本次病例底稿，仅模拟引擎可见】\n${JSON.stringify(dossier)}`,
