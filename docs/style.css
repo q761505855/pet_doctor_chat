@@ -372,6 +372,7 @@ dialog .topbar { min-height: 63px; padding: 10px 16px; }
 .api-settings-content { padding: 16px; }
 .api-settings-content .form-card { margin: 0; }
 .api-settings-hint { color: var(--muted); font-size: .83rem; }
+#api-settings-feedback { max-height: 8rem; overflow: auto; overflow-wrap: anywhere; }
 .api-settings-actions { display: flex; gap: 8px; }
 #save-api-settings { flex: 1; }
 #message-editor { height: auto; }

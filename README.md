@@ -16,10 +16,13 @@
 
 ## 配置 API
 
-在「病例管理」打开「AI 设置」，填入 API 地址和 Token，点「获取模型列表」，选中模型后点「保存设置」。API 地址可填写带版本路径的基址（如 `https://example.com/v1`）或完整的 `/chat/completions` 地址。默认使用 Bearer Token，也可按服务要求选择 `mj-api-secret`。
+在「病例管理」打开「AI 设置」，填入 API 地址和 Bearer Token，点「获取模型列表」，选中模型后点「保存设置」。API 地址可填写带版本路径的基址（如 `https://example.com/v1`）或完整的 `/chat/completions` 地址。
 
-- API 需要兼容 `GET /models` 和 `POST /chat/completions`，允许网页来源跨域调用这两个接口，并在预检响应中允许所选鉴权请求头和 `Content-Type`。通过 HTTPS 发布网页时，请使用 HTTPS 的 API 地址。
+选中模型后，可在保存前点「测试连接」，发送一句问候并查看模型回复或错误。
+
+- API 需要兼容 `GET /models` 和 `POST /chat/completions`，允许网页来源跨域调用这两个接口，并在预检响应中允许 `Authorization` 和 `Content-Type`。通过 HTTPS 发布网页时，请使用 HTTPS 的 API 地址。
 - 生成病例、接诊、手术、复盘和助手的 AI 请求使用已选模型。模型需要能根据预设返回 JSON。网页可读取流式回复，也能处理 JSON 响应。
+- 普通 AI 请求默认超时为 180 秒。流式回复收到第一段正文后停止计时，可在生成时点「停止」。获取模型列表和测试连接的超时分别为 15 秒和 30 秒。
 - URL、Token 和模型保存在当前浏览器的站点存储中。换浏览器或站点后需重新配置，可在「AI 设置」点「清除设置」。接诊和助手所需上下文会发送给配置的模型服务。
 
 ## 扩展预设和世界书

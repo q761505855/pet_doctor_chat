@@ -5,7 +5,7 @@ import {
   requestCompletion, requestModels
 } from '../docs/chat.mjs';
 
-test('模型列表和对话请求使用同一 API 路径、鉴权方式和所选模型', async () => {
+test('模型列表和对话请求统一用 Bearer Token，兼容之前保存的设置', async () => {
   const api = {
     baseUrl: 'https://example.test/proxy/v1/chat/completions/?api-version=example',
     apiKey: ' example-token ',
@@ -14,14 +14,15 @@ test('模型列表和对话请求使用同一 API 路径、鉴权方式和所选
   const models = await requestModels(api, async (url, options) => {
     assert.equal(url, 'https://example.test/proxy/v1/models?api-version=example');
     assert.equal(options.method, 'GET');
-    assert.deepEqual(options.headers, { 'mj-api-secret': 'example-token' });
+    assert.deepEqual(options.headers, { Authorization: 'Bearer example-token' });
     return Response.json({ data: [{ id: 'first' }, { id: 'selected' }, { id: 'first' }, {}] });
   });
   assert.deepEqual(models, ['first', 'selected']);
   await requestCompletion({ ...api, model: models[1] }, [], async (url, options) => {
     assert.equal(url, 'https://example.test/proxy/v1/chat/completions?api-version=example');
-    assert.equal(options.headers['mj-api-secret'], 'example-token');
-    assert.equal(options.headers.Authorization, undefined);
+    assert.deepEqual(options.headers, {
+      'Content-Type': 'application/json', Authorization: 'Bearer example-token'
+    });
     assert.equal(JSON.parse(options.body).model, 'selected');
     return Response.json({ choices: [{ message: { content: '你好' } }] });
   });
@@ -109,6 +110,56 @@ test('流式请求逐块解码正文，跳过思考内容，并拒绝中断的�
     new Response('data: {"choices":[{"delta":{"content":"半截"}}]}\n\n', {
       headers: { 'Content-Type': 'text/event-stream' }
     }), { onText() {} }), /中断/);
+});
+
+test('流式请求默认等待 180 秒，思考内容不解除超时', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let requestSignal;
+  const completion = requestCompletion({ baseUrl: 'https://example.test/v1', model: 'model' }, [],
+    async (url, { signal }) => {
+      requestSignal = signal;
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning_content":"思考中"}}]}\n\n'));
+          signal.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+        }
+      });
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
+    }, { onText: () => assert.fail('思考内容不应作为正文输出') });
+  const rejected = assert.rejects(completion, /API 请求超时/);
+
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(179999);
+  assert.equal(requestSignal.aborted, false);
+  t.mock.timers.tick(1);
+  assert.equal(requestSignal.aborted, true);
+  await rejected;
+});
+
+test('流式回复收到第一段正文后解除请求超时', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const encoder = new TextEncoder();
+  let stream;
+  let requestSignal;
+  const body = new ReadableStream({
+    start(controller) {
+      stream = controller;
+      stream.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n'));
+    }
+  });
+  const { promise: firstText, resolve: onText } = Promise.withResolvers();
+  const completion = requestCompletion({ baseUrl: 'https://example.test/v1', model: 'model', timeoutMs: 20 }, [],
+    async (url, { signal }) => {
+      requestSignal = signal;
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
+    }, { onText });
+
+  assert.equal(await firstText, '你好');
+  t.mock.timers.tick(1000);
+  stream.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"医生"}}]}\n\ndata: [DONE]\n\n'));
+  stream.close();
+  assert.equal(await completion, '你好医生');
+  assert.equal(requestSignal.aborted, false);
 });
 
 test('检查结果只归档本轮实际返回的有效项目', () => {

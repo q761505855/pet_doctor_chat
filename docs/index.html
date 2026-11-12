@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f5f7f3">
   <meta name="description" content="以病例为中心的宠物临床模拟训练。">
   <title>宠物问诊室</title>
-  <link rel="stylesheet" href="./style.css">
-  <script type="module" src="./app.mjs"></script>
+  <link rel="stylesheet" href="./style.css?v=connection-test">
+  <script type="module" src="./app.mjs?v=stream-timeout"></script>
 </head>
 <body>
   <main id="shell">
@@ -206,16 +206,12 @@
             <input id="api-url" name="baseUrl" type="url" placeholder="https://example.com/v1" required spellcheck="false">
             <label for="api-token">Token</label>
             <input id="api-token" name="apiKey" type="password" autocomplete="off" required>
-            <label for="api-auth">鉴权方式</label>
-            <select id="api-auth" name="auth">
-              <option value="bearer">Bearer Token</option>
-              <option value="mj-api-secret">mj-api-secret</option>
-            </select>
             <button class="soft" id="fetch-models" type="button">获取模型列表</button>
             <label for="api-model">模型</label>
             <select id="api-model" name="model" required disabled>
               <option value="">请选择模型</option>
             </select>
+            <button class="soft" id="test-api-connection" type="button" disabled>测试连接</button>
             <p class="api-settings-hint">设置保存在当前浏览器。共用设备上可在用完后清除设置。</p>
           </div>
         </div>
@@ -240,8 +236,10 @@
         <p>你扮演兽医，AI 扮演宠物家长，并模拟检查结果和手术现场。一次练习可以覆盖问诊、诊断、治疗沟通和复盘。</p>
         <section class="guide-section">
           <h3>连接 AI 模型</h3>
-          <p>在「病例管理」点「AI 设置」，填入 OpenAI 兼容服务的 API 地址和 Token。鉴权方式默认是 Bearer Token，服务要求使用 mj-api-secret 时可切换。</p>
+          <p>在「病例管理」点「AI 设置」，填入 OpenAI 兼容服务的 API 地址和 Bearer Token。</p>
           <p>点「获取模型列表」，在「模型」中选一个，再点「保存设置」。生成病例、接诊、手术、复盘和需要 AI 回答的助手请求都会使用该模型。</p>
+          <p>选好模型后，可以在保存前点「测试连接」。网页会向选中的模型发一句问候，并显示回复或错误。</p>
+          <p>获取模型列表和测试连接的超时分别为 15 秒和 30 秒。其他 AI 请求的默认超时为 180 秒。流式回复一收到第一段正文就停止计时，生成时仍可点「停止」。</p>
           <p>设置保存在当前浏览器。要换模型或 Token，可重新打开「AI 设置」。点「清除设置」可移除连接信息，已保存的病例仍可查看。</p>
         </section>
         <section class="guide-section">

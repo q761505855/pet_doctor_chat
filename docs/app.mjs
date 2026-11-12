@@ -1,12 +1,12 @@
 import {
   allowsCaseSpecies, bracketCommand, buildMessages, parseCase, parseCommandStage, parseReview, parseTurn, publicPreview, requestCompletion
-} from './chat.mjs';
+} from './chat.mjs?v=stream-timeout';
 import {
   caseDifficulties, caseMessages, caseReview, clinicalHistory, createCase, helperContext, nextTurnNumber,
   recordReview, recordTurn, reviewNotes, rewindCase
 } from './cases.mjs';
 import { openCaseStore } from './case-store.mjs';
-import { bindApiSettings } from './api-settings.mjs';
+import { bindApiSettings } from './api-settings.mjs?v=stream-timeout';
 
 const get = id => document.getElementById(id);
 const form = get('settings');
@@ -30,7 +30,7 @@ const resultTypes = { physical: '体格检查', test: '辅助检查' };
 const reportFlags = { normal: '正常', high: '↑ 偏高', low: '↓ 偏低', abnormal: '异常' };
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' });
 const systemTopics = [
-  ['怎么设置 AI 模型？', '在「病例管理」点「AI 设置」，填入 API 地址和 Token，点「获取模型列表」，选中模型后点「保存设置」。鉴权默认使用 Bearer Token，服务要求 mj-api-secret 时可切换。设置保存在当前浏览器，可在同一处清除。'],
+  ['怎么设置 AI 模型？', '在「病例管理」点「AI 设置」，填入 API 地址和 Bearer Token，再点「获取模型列表」。选好模型后，可以点「测试连接」发一句问候，查看模型回复。点「保存设置」后，设置会保存在当前浏览器，可在同一处清除。'],
   ['如何开始接诊？', '先在「病例管理」点「新建病例」。如果还没想好练什么，病例范围可以留空，两个难度也都能选「随机」。点「生成病例」，看过宠物和家长的档案，再点「开始接诊」。你来当兽医，AI 扮演宠物家长。'],
   ['如何重试同一个病例？', '想把同一个病例再练一遍，可以打开「档案」，点「删除病例」下方的「重试」。你会用同一份病例资料，从家长的第一句话重新开始。之前那一轮还可以在病例列表里找到。'],
   ['检查和复盘在哪看？', '做完检查后，点同一个病例里的「检查」就能看报告。练完后点「结束接诊并复盘」，再去「复盘」看反馈。你每轮写下的备注也会在那里得到评价。'],

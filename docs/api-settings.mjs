@@ -1,12 +1,14 @@
-import { requestModels } from './chat.mjs';
+import { requestCompletion, requestModels } from './chat.mjs?v=stream-timeout';
 
 const storageKey = 'pet-doctor-chat:api-settings';
 
 function readSavedSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
-    if ([saved?.baseUrl, saved?.apiKey, saved?.model].every(value => typeof value === 'string' && value.trim()) &&
-        ['bearer', 'mj-api-secret'].includes(saved.auth)) return saved;
+    if ([saved?.baseUrl, saved?.apiKey, saved?.model].every(value => typeof value === 'string' && value.trim())) {
+      const { baseUrl, apiKey, model } = saved;
+      return { baseUrl, apiKey, model };
+    }
   } catch {
     // The settings form remains available if storage is blocked or the saved value is invalid.
   }
@@ -14,8 +16,9 @@ function readSavedSettings() {
 
 export function bindApiSettings(dialog, notice) {
   const form = dialog.querySelector('#api-settings-form');
-  const { baseUrl, apiKey, auth, model } = form.elements;
+  const { baseUrl, apiKey, model } = form.elements;
   const fetchButton = dialog.querySelector('#fetch-models');
+  const testButton = dialog.querySelector('#test-api-connection');
   const saveButton = dialog.querySelector('#save-api-settings');
   const clearButton = dialog.querySelector('#clear-api-settings');
   const status = dialog.querySelector('#api-settings-feedback');
@@ -30,13 +33,13 @@ export function bindApiSettings(dialog, notice) {
   }
 
   function connection() {
-    return { baseUrl: baseUrl.value.trim(), apiKey: apiKey.value.trim(), auth: auth.value };
+    return { baseUrl: baseUrl.value.trim(), apiKey: apiKey.value.trim() };
   }
 
   function updateControls() {
     fetchButton.disabled = Boolean(pending);
     model.disabled = Boolean(pending) || model.options.length === 1;
-    saveButton.disabled = model.disabled || !model.value;
+    testButton.disabled = saveButton.disabled = model.disabled || !model.value;
     clearButton.hidden = !saved;
   }
 
@@ -46,44 +49,45 @@ export function bindApiSettings(dialog, notice) {
     updateControls();
   }
 
-  function cancelFetch() {
+  function cancelRequest() {
     pending?.abort();
     pending = undefined;
   }
 
   function show() {
-    cancelFetch();
+    cancelRequest();
     baseUrl.value = saved?.baseUrl ?? '';
     apiKey.value = saved?.apiKey ?? '';
-    auth.value = saved?.auth ?? 'bearer';
     apiKey.setCustomValidity('');
     showModels(saved ? [saved.model] : [], saved?.model);
     feedback();
     dialog.showModal();
   }
 
-  for (const field of [baseUrl, apiKey, auth]) {
+  for (const field of [baseUrl, apiKey]) {
     field.addEventListener('input', () => {
       apiKey.setCustomValidity('');
-      cancelFetch();
+      cancelRequest();
       showModels([]);
       feedback();
     });
   }
-  model.addEventListener('change', updateControls);
-  fetchButton.addEventListener('click', async () => {
+  model.addEventListener('change', () => {
+    updateControls();
+    feedback();
+  });
+
+  async function runCheck(loading, request, showResult) {
     const settings = connection();
     apiKey.setCustomValidity(settings.apiKey ? '' : '请输入 Token。');
     if (!baseUrl.reportValidity() || !apiKey.reportValidity()) return;
     const controller = new AbortController();
     pending = controller;
     updateControls();
-    feedback('正在获取模型列表…');
+    feedback(loading);
     try {
-      const models = await requestModels(settings, fetch, { signal: controller.signal });
-      if (pending !== controller || !dialog.open) return;
-      showModels(models, model.value);
-      feedback(`已获取 ${models.length} 个模型。`);
+      const result = await request(settings, controller.signal);
+      if (pending === controller && dialog.open) showResult(result);
     } catch (error) {
       if (pending === controller && dialog.open) feedback(error.message, true);
     } finally {
@@ -92,7 +96,26 @@ export function bindApiSettings(dialog, notice) {
         updateControls();
       }
     }
-  });
+  }
+
+  fetchButton.addEventListener('click', () => runCheck(
+    '正在获取模型列表…',
+    (settings, signal) => requestModels(settings, fetch, { signal }),
+    models => {
+      showModels(models, model.value);
+      feedback(`已获取 ${models.length} 个模型。`);
+    }
+  ));
+
+  testButton.addEventListener('click', () => runCheck(
+    '正在测试连接…',
+    (settings, signal) => requestCompletion(
+      { ...settings, model: model.value, timeoutMs: 30000 },
+      [{ role: 'user', content: '你好！请用一句话打个招呼。' }],
+      fetch, { signal }
+    ),
+    reply => feedback(`连接成功。模型回复「${reply.trim()}」`)
+  ));
 
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -123,7 +146,7 @@ export function bindApiSettings(dialog, notice) {
 
   dialog.addEventListener('close', () => {
     if (dialog.open) return;
-    cancelFetch();
+    cancelRequest();
     apiKey.value = '';
   });
 

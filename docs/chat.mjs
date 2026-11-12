@@ -249,16 +249,13 @@ function apiEndpoint(baseUrl, resource) {
 function apiHeaders(api, defaults) {
   const headers = { ...defaults, ...api.headers };
   const token = api.apiKey?.trim();
-  if (token) {
-    if (api.auth === 'mj-api-secret') headers['mj-api-secret'] = token;
-    else headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
 function responseError(status, missingResource) {
   const hints = {
-    401: '请检查「AI 设置」中的 Token 和鉴权方式。',
+    401: '请检查「AI 设置」中的 Token。',
     403: '请检查 Token 权限和接口的访问限制。',
     404: missingResource,
     429: '请检查额度或稍后重试。'
@@ -299,10 +296,10 @@ export async function requestCompletion(api, messages, send = fetch, { onText, s
   if (signal?.aborted) cancel();
   else signal?.addEventListener('abort', cancel, { once: true });
   let timedOut = false;
-  const timer = setTimeout(() => {
+  let timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, api.timeoutMs ?? 90000);
+  }, api.timeoutMs ?? 180000);
 
   try {
     const stream = Boolean(onText) && api.stream !== false;
@@ -326,7 +323,13 @@ export async function requestCompletion(api, messages, send = fetch, { onText, s
     let text;
     try {
       if (response.body && response.headers.get('content-type')?.includes('text/event-stream')) {
-        text = await readCompletionStream(response.body, onText);
+        text = await readCompletionStream(response.body, partial => {
+          if (timer !== undefined && partial.trim()) {
+            clearTimeout(timer);
+            timer = undefined;
+          }
+          onText?.(partial);
+        });
       } else {
         text = (await response.json())?.choices?.[0]?.message?.content;
       }
