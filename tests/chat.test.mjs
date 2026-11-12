@@ -1,8 +1,42 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  allowsCaseSpecies, bracketCommand, buildMessages, parseCase, parseCommandStage, parseTurn, publicPreview, requestCompletion
+  allowsCaseSpecies, bracketCommand, buildMessages, parseCase, parseCommandStage, parseTurn, publicPreview,
+  requestCompletion, requestModels
 } from '../docs/chat.mjs';
+
+test('模型列表和对话请求使用同一 API 路径、鉴权方式和所选模型', async () => {
+  const api = {
+    baseUrl: 'https://example.test/proxy/v1/chat/completions/?api-version=example',
+    apiKey: ' example-token ',
+    auth: 'mj-api-secret'
+  };
+  const models = await requestModels(api, async (url, options) => {
+    assert.equal(url, 'https://example.test/proxy/v1/models?api-version=example');
+    assert.equal(options.method, 'GET');
+    assert.deepEqual(options.headers, { 'mj-api-secret': 'example-token' });
+    return Response.json({ data: [{ id: 'first' }, { id: 'selected' }, { id: 'first' }, {}] });
+  });
+  assert.deepEqual(models, ['first', 'selected']);
+  await requestCompletion({ ...api, model: models[1] }, [], async (url, options) => {
+    assert.equal(url, 'https://example.test/proxy/v1/chat/completions?api-version=example');
+    assert.equal(options.headers['mj-api-secret'], 'example-token');
+    assert.equal(options.headers.Authorization, undefined);
+    assert.equal(JSON.parse(options.body).model, 'selected');
+    return Response.json({ choices: [{ message: { content: '你好' } }] });
+  });
+});
+
+test('获取模型时区分无可用模型、令牌错误和无效地址', async () => {
+  const api = { baseUrl: 'https://example.test/v1/', apiKey: 'example-token' };
+  await assert.rejects(requestModels(api, async (url, options) => {
+    assert.equal(url, 'https://example.test/v1/models');
+    assert.equal(options.headers.Authorization, 'Bearer example-token');
+    return Response.json({ data: [] });
+  }), /没有返回可选模型/);
+  await assert.rejects(requestModels(api, async () => new Response(null, { status: 401 })), /HTTP 401.*Token/);
+  await assert.rejects(requestModels({ ...api, baseUrl: 'https://user@example.test' }), /有效的 API 地址/);
+});
 
 const preset = {
   messages: [

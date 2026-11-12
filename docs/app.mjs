@@ -6,6 +6,7 @@ import {
   recordReview, recordTurn, reviewNotes, rewindCase
 } from './cases.mjs';
 import { openCaseStore } from './case-store.mjs';
+import { bindApiSettings } from './api-settings.mjs';
 
 const get = id => document.getElementById(id);
 const form = get('settings');
@@ -17,6 +18,8 @@ const clinicalDrafts = [draft, noteDraft, surgeryDraft, surgeryNoteDraft];
 const assistantDraft = get('assistant-draft');
 const assistantDialog = get('assistant-dialog');
 const systemHelpDialog = get('system-help-dialog');
+const apiSettingsDialog = get('api-settings-dialog');
+const apiSettings = bindApiSettings(apiSettingsDialog, get('api-setup-notice'));
 const messageEditor = get('message-editor');
 const messageEditorDraft = get('message-editor-draft');
 const tabs = [...document.querySelectorAll('[data-tab]')];
@@ -27,11 +30,13 @@ const resultTypes = { physical: '体格检查', test: '辅助检查' };
 const reportFlags = { normal: '正常', high: '↑ 偏高', low: '↓ 偏低', abnormal: '异常' };
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' });
 const systemTopics = [
+  ['怎么设置 AI 模型？', '在「病例管理」点「AI 设置」，填入 API 地址和 Token，点「获取模型列表」，选中模型后点「保存设置」。鉴权默认使用 Bearer Token，服务要求 mj-api-secret 时可切换。设置保存在当前浏览器，可在同一处清除。'],
   ['如何开始接诊？', '先在「病例管理」点「新建病例」。如果还没想好练什么，病例范围可以留空，两个难度也都能选「随机」。点「生成病例」，看过宠物和家长的档案，再点「开始接诊」。你来当兽医，AI 扮演宠物家长。'],
   ['如何重试同一个病例？', '想把同一个病例再练一遍，可以打开「档案」，点「删除病例」下方的「重试」。你会用同一份病例资料，从家长的第一句话重新开始。之前那一轮还可以在病例列表里找到。'],
   ['检查和复盘在哪看？', '做完检查后，点同一个病例里的「检查」就能看报告。练完后点「结束接诊并复盘」，再去「复盘」看反馈。你每轮写下的备注也会在那里得到评价。'],
   ['病例保存在哪里？', '病例和练习记录都存在你现在用的浏览器里。想接着练，回到「病例管理」，点开原来的病例就行。清除这个网站的浏览器数据也会清掉本机病例。']
 ];
+const apiSetupHint = '请返回「病例管理」，在「AI 设置」中连接模型。';
 let store;
 let config;
 let configError;
@@ -121,7 +126,7 @@ async function openCase(id) {
   if (activeRequest) return;
   try {
     const record = await store.get(id);
-    if (get('library').hidden || activeRequest || assistantDialog.open || systemHelpDialog.open) return;
+    if (get('library').hidden || activeRequest || assistantDialog.open || systemHelpDialog.open || apiSettingsDialog.open) return;
     if (!record) {
       await loadLibrary();
       libraryError('这份病例已删除。');
@@ -514,7 +519,9 @@ function renderControls() {
 }
 
 function complete(stage, history, options = {}) {
-  const { preset, worldbook, api } = config;
+  const api = apiSettings.current;
+  if (!api) throw new Error(apiSetupHint);
+  const { preset, worldbook } = config;
   const isolated = ['helper', 'help', 'command'].includes(stage);
   const request = activeRequest;
   const messages = buildMessages({
@@ -749,6 +756,10 @@ function askAssistant(text, answer, retryIndex = -1) {
 }
 
 get('new-case').addEventListener('click', () => {
+  if (!apiSettings.current) {
+    apiSettings.show();
+    return;
+  }
   form.reset();
   form.querySelector('details').open = false;
   refreshPersona();
@@ -756,6 +767,7 @@ get('new-case').addEventListener('click', () => {
   feedback('create-', configError || (config ? '' : '正在加载配置…'), Boolean(configError));
 });
 for (const button of document.querySelectorAll('[data-library]')) button.addEventListener('click', showLibrary);
+get('open-api-settings').addEventListener('click', apiSettings.show);
 get('open-system-help').addEventListener('click', () => {
   systemHelpDialog.showModal();
   get('system-guide').scrollTop = 0;
@@ -786,6 +798,10 @@ get('surgery-form').addEventListener('submit', event => {
 });
 function startReview() {
   if (!config || !current || current.phase === 'review' || activeRequest) return;
+  if (!apiSettings.current) {
+    feedback('', apiSetupHint, true);
+    return;
+  }
   const unfinished = clinicalDrafts.some(field => field.value.trim());
   if (!window.confirm(unfinished ? '还有未发送的消息或备注。确定结束接诊并生成复盘？' : '结束本病例接诊并生成复盘？')) return;
   selectTab('review-panel');
@@ -880,13 +896,13 @@ await Promise.all([
     get('library-empty').hidden = true;
     libraryError('无法打开本机存储。请确认浏览器允许此网站保存数据后刷新重试。');
   }),
-  Promise.all(['preset', 'worldbook', 'api'].map(loadConfig)).then(([preset, worldbook, api]) => {
+  Promise.all(['preset', 'worldbook'].map(loadConfig)).then(([preset, worldbook]) => {
     if (!Array.isArray(preset?.messages) || !preset.tasks?.case || !preset.tasks?.help || !preset.tasks?.surgery ||
         !preset.tasks?.command ||
-        !Array.isArray(worldbook?.entries) || !api || typeof api !== 'object') {
-      throw new Error('配置结构有误，请检查预设、世界书和 API 文件。');
+        !Array.isArray(worldbook?.entries)) {
+      throw new Error('配置结构有误，请检查预设和世界书文件。');
     }
-    config = { preset, worldbook, api };
+    config = { preset, worldbook };
     feedback('create-');
   }).catch(error => {
     configError = error.message;

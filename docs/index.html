@@ -15,6 +15,7 @@
       <header class="topbar">
         <span class="brand"><span class="brand-mark" aria-hidden="true">+</span>宠物问诊室</span>
         <div class="library-actions">
+          <button id="open-api-settings" class="soft" type="button" aria-haspopup="dialog" aria-controls="api-settings-dialog">AI 设置</button>
           <button id="open-system-help" class="soft" type="button" aria-haspopup="dialog" aria-controls="system-help-dialog">系统帮助</button>
           <button class="soft" data-assistant type="button" aria-haspopup="dialog" aria-controls="assistant-dialog">助手</button>
         </div>
@@ -28,6 +29,7 @@
             <button class="primary" id="new-case" type="button"><span aria-hidden="true">＋</span> 新建病例</button>
           </div>
         </section>
+        <p id="api-setup-notice" class="feedback" hidden>使用 AI 功能前，请在「AI 设置」中连接模型。</p>
         <div class="list-heading">
           <h2>我的病例</h2>
           <span class="local-label">本机保存</span>
@@ -191,6 +193,43 @@
     </section>
   </main>
 
+  <dialog id="api-settings-dialog" aria-labelledby="api-settings-title">
+    <div class="dialog-content">
+      <header class="topbar subpage">
+        <h2 id="api-settings-title">AI 设置</h2>
+        <form method="dialog"><button class="soft close" aria-label="关闭 AI 设置" autofocus>×</button></form>
+      </header>
+      <form id="api-settings-form" class="create-form">
+        <div class="scroll api-settings-content">
+          <div class="form-card">
+            <label for="api-url">API 地址</label>
+            <input id="api-url" name="baseUrl" type="url" placeholder="https://example.com/v1" required spellcheck="false">
+            <label for="api-token">Token</label>
+            <input id="api-token" name="apiKey" type="password" autocomplete="off" required>
+            <label for="api-auth">鉴权方式</label>
+            <select id="api-auth" name="auth">
+              <option value="bearer">Bearer Token</option>
+              <option value="mj-api-secret">mj-api-secret</option>
+            </select>
+            <button class="soft" id="fetch-models" type="button">获取模型列表</button>
+            <label for="api-model">模型</label>
+            <select id="api-model" name="model" required disabled>
+              <option value="">请选择模型</option>
+            </select>
+            <p class="api-settings-hint">设置保存在当前浏览器。共用设备上可在用完后清除设置。</p>
+          </div>
+        </div>
+        <footer class="action-bar">
+          <p id="api-settings-feedback" class="feedback" role="status" hidden></p>
+          <div class="api-settings-actions">
+            <button class="soft" id="clear-api-settings" type="button" hidden>清除设置</button>
+            <button class="primary" id="save-api-settings" type="submit" disabled>保存设置</button>
+          </div>
+        </footer>
+      </form>
+    </div>
+  </dialog>
+
   <dialog id="system-help-dialog" aria-labelledby="system-help-title">
     <div class="dialog-content">
       <header class="topbar subpage">
@@ -200,8 +239,14 @@
       <div class="scroll guide-content" id="system-guide" tabindex="0" aria-label="使用指南">
         <p>你扮演兽医，AI 扮演宠物家长，并模拟检查结果和手术现场。一次练习可以覆盖问诊、诊断、治疗沟通和复盘。</p>
         <section class="guide-section">
+          <h3>连接 AI 模型</h3>
+          <p>在「病例管理」点「AI 设置」，填入 OpenAI 兼容服务的 API 地址和 Token。鉴权方式默认是 Bearer Token，服务要求使用 mj-api-secret 时可切换。</p>
+          <p>点「获取模型列表」，在「模型」中选一个，再点「保存设置」。生成病例、接诊、手术、复盘和需要 AI 回答的助手请求都会使用该模型。</p>
+          <p>设置保存在当前浏览器。要换模型或 Token，可重新打开「AI 设置」。点「清除设置」可移除连接信息，已保存的病例仍可查看。</p>
+        </section>
+        <section class="guide-section">
           <h3>新建病例</h3>
-          <p>在「病例管理」点「新建病例」。病例范围可留空，也可以写「猫、呕吐」或指定想练的病种和场景。</p>
+          <p>连接模型后，在「病例管理」点「新建病例」。病例范围可留空，也可以写「猫、呕吐」或指定想练的病种和场景。</p>
           <ul>
             <li><strong>病例难度</strong>决定临床复杂度。入门练常见门诊，中等可能需要进一步检查或判断是否手术，高难涉及老年、神经内科等复杂情况。选随机可在三个档位中抽取。</li>
             <li><strong>家长难度</strong>决定沟通挑战。可选配合型、普通型、高难度型或难缠家长，也可选「随机」从四档中抽取。手动选择「难缠家长」时还可以指定人设。</li>

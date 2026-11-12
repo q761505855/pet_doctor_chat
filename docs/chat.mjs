@@ -232,19 +232,68 @@ async function readCompletionStream(body, onText) {
   }
 }
 
-export async function requestCompletion(api, messages, send = fetch, { onText, signal } = {}) {
+function apiEndpoint(baseUrl, resource) {
   let endpoint;
   try {
-    endpoint = new URL(api.baseUrl);
-    if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error();
+    endpoint = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw new Error();
   } catch {
-    throw new Error('请在 config/api.json 中填写有效的 API 地址。');
+    throw new Error('请在「AI 设置」中填写有效的 API 地址。');
   }
-  if (!api.model?.trim()) throw new Error('请在 config/api.json 中填写模型名称。');
-  const path = endpoint.pathname.replace(/\/+$/, '');
-  endpoint.pathname = path.endsWith('/chat/completions') ? path : `${path}/chat/completions`;
-  const headers = { 'Content-Type': 'application/json', ...api.headers };
-  if (api.apiKey?.trim()) headers.Authorization = `Bearer ${api.apiKey.trim()}`;
+  const path = endpoint.pathname.replace(/\/+$/, '').replace(/\/(?:chat\/completions|models)$/, '');
+  endpoint.pathname = `${path}/${resource}`;
+  endpoint.hash = '';
+  return endpoint.href;
+}
+
+function apiHeaders(api, defaults) {
+  const headers = { ...defaults, ...api.headers };
+  const token = api.apiKey?.trim();
+  if (token) {
+    if (api.auth === 'mj-api-secret') headers['mj-api-secret'] = token;
+    else headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+function responseError(status, missingResource) {
+  const hints = {
+    401: '请检查「AI 设置」中的 Token 和鉴权方式。',
+    403: '请检查 Token 权限和接口的访问限制。',
+    404: missingResource,
+    429: '请检查额度或稍后重试。'
+  };
+  return new Error(`API 请求失败（HTTP ${status}）。${hints[status] ?? '请重试。'}`);
+}
+
+export async function requestModels(api, send = fetch, { signal } = {}) {
+  const endpoint = apiEndpoint(api.baseUrl, 'models');
+  const timeout = AbortSignal.timeout(15000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  let response;
+  let data;
+  try {
+    response = await send(endpoint, {
+      method: 'GET', headers: apiHeaders(api), cache: 'no-store', redirect: 'error', signal: requestSignal
+    });
+    if (response.ok) data = await response.json();
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason;
+    if (timeout.aborted) throw new Error('获取模型列表超时，请重试。');
+    if (error instanceof SyntaxError) throw new Error('API 返回的模型列表格式无效。');
+    throw new Error('无法获取模型列表。请检查 API 地址及服务的跨域（CORS）设置。');
+  }
+  if (!response.ok) throw responseError(response.status, '请检查 API 地址及服务是否提供模型列表。');
+  if (!Array.isArray(data?.data)) throw new Error('API 返回的模型列表格式无效。');
+  const models = [...new Set(data.data.map(item => cleanText(item?.id)).filter(Boolean))];
+  if (!models.length) throw new Error('API 没有返回可选模型。请检查 Token 的模型访问权限。');
+  return models;
+}
+
+export async function requestCompletion(api, messages, send = fetch, { onText, signal } = {}) {
+  const endpoint = apiEndpoint(api.baseUrl, 'chat/completions');
+  if (!api.model?.trim()) throw new Error('请在「AI 设置」中选择模型。');
+  const headers = apiHeaders(api, { 'Content-Type': 'application/json' });
   const controller = new AbortController();
   const cancel = () => controller.abort(signal.reason);
   if (signal?.aborted) cancel();
@@ -260,9 +309,10 @@ export async function requestCompletion(api, messages, send = fetch, { onText, s
 
     let response;
     try {
-      response = await send(endpoint.href, {
+      response = await send(endpoint, {
         method: 'POST',
         headers,
+        redirect: 'error',
         signal: controller.signal,
         body: JSON.stringify({ ...api.parameters, model: api.model, messages, stream })
       });
@@ -272,15 +322,7 @@ export async function requestCompletion(api, messages, send = fetch, { onText, s
       throw new Error('无法连接 API。请检查接口地址及服务的跨域（CORS）设置。');
     }
 
-    if (!response.ok) {
-      const hints = {
-        401: '请检查 config/api.json 中的 API Key。',
-        403: '请检查令牌权限和接口的访问限制。',
-        404: '请检查 API 地址和模型名。',
-        429: '请检查额度或稍后重试。'
-      };
-      throw new Error(`API 请求失败（HTTP ${response.status}）。${hints[response.status] ?? '请重试。'}`);
-    }
+    if (!response.ok) throw responseError(response.status, '请检查 API 地址和模型。');
     let text;
     try {
       if (response.body && response.headers.get('content-type')?.includes('text/event-stream')) {

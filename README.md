@@ -16,13 +16,11 @@
 
 ## 配置 API
 
-编辑 [docs/config/api.json](docs/config/api.json)，填写 `baseUrl`、`model` 和接口需要的 `apiKey`。支持 OpenAI 兼容的 Chat Completions 接口。`baseUrl` 可以是带版本路径的 API 基址（如 `https://api.openai.com/v1`），也可以是完整的 `/chat/completions` 地址。
+在「病例管理」打开「AI 设置」，填入 API 地址和 Token，点「获取模型列表」，选中模型后点「保存设置」。API 地址可填写带版本路径的基址（如 `https://example.com/v1`）或完整的 `/chat/completions` 地址。默认使用 Bearer Token，也可按服务要求选择 `mj-api-secret`。
 
-- `headers` 可选，用来填写服务商要求的额外请求头。`apiKey` 有值时会发送 `Authorization: Bearer …`。
-- 当前 `openai.chatnewai.com` 配置将令牌填在 `headers.mj-api-secret`，并留空 `apiKey`。该网关接受这个鉴权头，跨域预检返回的 `Access-Control-Allow-Headers: *` 也允许它。更换 API 服务时，按新服务的要求填写鉴权配置。 [New API 鉴权实现](https://github.com/QuantumNous/new-api/blob/main/middleware/auth.go)
-- `parameters` 可选，可填写模型支持的参数，例如 `temperature`。网页默认使用 Chat Completions 流式回复。对不支持流式输出的服务，可以设 `stream: false`。模型需要能根据预设返回 JSON，病例开场或回复字段放在首位时，网页可随流显示这段内容。
-- Pages 使用 HTTPS。API 服务需要允许从站点来源发起跨域 POST 请求。使用 Bearer 令牌时，API 的 OPTIONS 响应须在 `Access-Control-Allow-Headers` 中明确列出 `Authorization, Content-Type`。 [Fetch 标准](https://fetch.spec.whatwg.org/#cors-preflight-fetch)
-- 三个配置文件均随网站公开。任何访客都可以读取写入文件的令牌。模拟病例底稿随病例存在浏览器本地，可通过开发者工具查看。接诊和助手所需上下文会发送给配置的模型服务。
+- API 需要兼容 `GET /models` 和 `POST /chat/completions`，允许网页来源跨域调用这两个接口，并在预检响应中允许所选鉴权请求头和 `Content-Type`。通过 HTTPS 发布网页时，请使用 HTTPS 的 API 地址。
+- 生成病例、接诊、手术、复盘和助手的 AI 请求使用已选模型。模型需要能根据预设返回 JSON。网页可读取流式回复，也能处理 JSON 响应。
+- URL、Token 和模型保存在当前浏览器的站点存储中。换浏览器或站点后需重新配置，可在「AI 设置」点「清除设置」。接诊和助手所需上下文会发送给配置的模型服务。
 
 ## 扩展预设和世界书
 
@@ -74,4 +72,4 @@ python -m http.server 8001 --bind 127.0.0.1 --directory docs
 python -c "import functools,http.server; http.server.SimpleHTTPRequestHandler.extensions_map['.mjs']='text/javascript'; handler=functools.partial(http.server.SimpleHTTPRequestHandler,directory='docs'); http.server.ThreadingHTTPServer(('127.0.0.1',8001),handler).serve_forever()"
 ```
 
-将项目推送到 GitHub 后，在 **Settings → Pages → Build and deployment** 选择 **Deploy from a branch**，来源设为 **main /docs**，然后保存。网页和三个配置文件都通过相对路径加载，无需构建。 [GitHub Pages 发布说明](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+将项目推送到 GitHub 后，在 **Settings → Pages → Build and deployment** 选择 **Deploy from a branch**，来源设为 **main /docs**，然后保存。网页、预设和世界书都通过相对路径加载，无需构建。 [GitHub Pages 发布说明](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
